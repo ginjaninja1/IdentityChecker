@@ -49,12 +49,17 @@ namespace IdentityChecker.Providers
         public async Task<IEnumerable<RemoteSearchResult>> GetSearchResults(SeriesInfo searchInfo, CancellationToken cancellationToken)
         {
             var config = GetConfiguration();
-            if (!config.EnablePlugin) return Enumerable.Empty<RemoteSearchResult>();
             var correlation = Guid.NewGuid().ToString("N").Substring(0, 8);
-            var referenceItem = ResolveReferenceItem(searchInfo);
-            var sourcePlan = GetSourcePlan(config, searchInfo, referenceItem);
+            LogSearchInput(correlation, searchInfo, config);
+            if (!config.EnablePlugin)
+            {
+                this.logger.Info("ResolverStarted {0}: pathway=manual-search, disabled=true; returning=0", correlation);
+                return Enumerable.Empty<RemoteSearchResult>();
+            }
+            var referenceItem = ResolveReferenceItem(searchInfo, correlation);
+            var sourcePlan = GetSourcePlan(config, searchInfo, referenceItem, correlation);
             this.logger.Info("ResolverStarted {0}: pathway=manual-search, name={1}, year={2}, source={3}, language={4}, country={5}",
-                correlation, searchInfo.Name, searchInfo.Year, config.SourceMode, searchInfo.MetadataLanguage, searchInfo.MetadataCountryCode);
+                correlation, searchInfo?.Name, searchInfo?.Year, config.SourceMode, searchInfo?.MetadataLanguage, searchInfo?.MetadataCountryCode);
             var found = await Search(searchInfo, referenceItem, sourcePlan.Sources, config,
                 sourcePlan.HasLibraryConfiguration && referenceItem == null, cancellationToken).ConfigureAwait(false);
             var selection = SeriesCandidateSelector.Select(searchInfo.Name, searchInfo.Year, found.Select(x => x.Candidate), config, sourcePlan.TieBreakOrder);
@@ -66,12 +71,12 @@ namespace IdentityChecker.Providers
 
         public async Task<MetadataResult<Series>> GetMetadata(SeriesInfo info, CancellationToken cancellationToken)
         {
-            return await Resolve(info, ResolveReferenceItem(info), cancellationToken).ConfigureAwait(false);
+            return await Resolve(info, ResolveReferenceItem(info, null), cancellationToken).ConfigureAwait(false);
         }
 
         public async Task<MetadataResult<Series>> GetMetadata(RemoteMetadataFetchOptions<SeriesInfo> options, CancellationToken cancellationToken)
         {
-            return await Resolve(options.SearchInfo, ResolveReferenceItem(options.SearchInfo), cancellationToken).ConfigureAwait(false);
+            return await Resolve(options.SearchInfo, ResolveReferenceItem(options.SearchInfo, null), cancellationToken).ConfigureAwait(false);
         }
 
         private async Task<MetadataResult<Series>> Resolve(SeriesInfo info, BaseItem referenceItem, CancellationToken cancellationToken)
@@ -91,8 +96,8 @@ namespace IdentityChecker.Providers
                 return result;
             }
 
-            referenceItem = referenceItem ?? ResolveReferenceItem(info);
-            var sourcePlan = GetSourcePlan(config, info, referenceItem);
+            referenceItem = referenceItem ?? ResolveReferenceItem(info, correlation);
+            var sourcePlan = GetSourcePlan(config, info, referenceItem, correlation);
             var found = await Search(info, referenceItem, sourcePlan.Sources, config,
                 sourcePlan.HasLibraryConfiguration && referenceItem == null, cancellationToken).ConfigureAwait(false);
             var selection = SeriesCandidateSelector.Select(info.Name, info.Year, found.Select(x => x.Candidate), config, sourcePlan.TieBreakOrder);
@@ -199,24 +204,59 @@ namespace IdentityChecker.Providers
                 .Select(g => g.First()).ToList();
         }
 
-        private BaseItem ResolveReferenceItem(SeriesInfo info)
+        private void LogSearchInput(string correlation, SeriesInfo info, PluginConfiguration config)
         {
-            if (info == null || string.IsNullOrWhiteSpace(info.Path)) return null;
+            if (info == null)
+            {
+                this.logger.Info("ManualSearchInput {0}: info=null, pluginEnabled={1}, sourceMode={2}",
+                    correlation, config.EnablePlugin, config.SourceMode);
+                return;
+            }
+
+            var providerIds = info.ProviderIds == null
+                ? "null"
+                : string.Join(",", info.ProviderIds.Select(x => x.Key + "=" + x.Value));
+            this.logger.Info("ManualSearchInput {0}: type={1}, name={2}, year={3}, path={4}, pathIsNull={5}, metadataLanguage={6}, country={7}, metadataLanguages={8}, providerIds={9}, sourceMode={10}, pluginEnabled={11}",
+                correlation, info.GetType().FullName, info.Name ?? "<null>", info.Year,
+                info.Path ?? "<null>", info.Path == null, info.MetadataLanguage ?? "<null>",
+                info.MetadataCountryCode ?? "<null>", info.MetadataLanguages == null ? "null" : string.Join(",", info.MetadataLanguages.Select(x => x?.ThreeLetterISOLanguageName ?? x?.Name ?? "<null>")),
+                providerIds, config.SourceMode, config.EnablePlugin);
+        }
+
+        private BaseItem ResolveReferenceItem(SeriesInfo info, string correlation)
+        {
+            if (info == null)
+            {
+                this.logger.Info("LibraryContextLookup {0}: reference-item lookup skipped; reason=search-info-null", correlation ?? "n/a");
+                return null;
+            }
+            if (string.IsNullOrWhiteSpace(info.Path))
+            {
+                this.logger.Info("LibraryContextLookup {0}: reference-item lookup skipped; reason=path-empty", correlation ?? "n/a");
+                return null;
+            }
             try
             {
                 var item = this.libraryManager.FindByPath(info.Path, true);
-                return item is Series ? item : null;
+                if (item is Series)
+                {
+                    this.logger.Info("LibraryContextLookup {0}: FindByPath matched series; itemId={1}, path={2}", correlation ?? "n/a", item.InternalId, item.Path);
+                    return item;
+                }
+                this.logger.Info("LibraryContextLookup {0}: FindByPath result={1}; expected=Series, path={2}",
+                    correlation ?? "n/a", item == null ? "no-item" : item.GetType().FullName, info.Path);
+                return null;
             }
             catch (Exception ex)
             {
-                this.logger.ErrorException("Could not resolve series library context from path " + info.Path, ex);
+                this.logger.ErrorException("LibraryContextLookup " + (correlation ?? "n/a") + ": FindByPath threw for path " + info.Path, ex);
                 return null;
             }
         }
 
-        private SourcePlan GetSourcePlan(PluginConfiguration config, SeriesInfo searchInfo, BaseItem referenceItem)
+        private SourcePlan GetSourcePlan(PluginConfiguration config, SeriesInfo searchInfo, BaseItem referenceItem, string correlation)
         {
-            LibraryOptions options = referenceItem == null ? FindLibraryOptionsByPath(searchInfo?.Path) : null;
+            LibraryOptions options = referenceItem == null ? FindLibraryOptionsByPath(searchInfo?.Path, correlation) : null;
             TypeOptions seriesOptions = null;
             if (referenceItem != null)
             {
@@ -226,7 +266,7 @@ namespace IdentityChecker.Providers
                 }
                 catch (Exception ex)
                 {
-                    this.logger.ErrorException("Could not read series library provider configuration", ex);
+                    this.logger.ErrorException("LibraryProviderConfiguration " + correlation + ": GetLibraryOptions(item) threw", ex);
                 }
             }
             seriesOptions = options?.GetTypeOptions("Series");
@@ -262,34 +302,63 @@ namespace IdentityChecker.Providers
             if (tieBreakOrder.Count == 0) tieBreakOrder.AddRange(new[] { Tvdb, Tmdb });
 
             var context = referenceItem != null ? "item" : options != null ? "virtual-folder" : "unavailable";
-            this.logger.Info("LibraryProviderConfiguration: context={0}, path={1}, sourceMode={2}, detectedEnabled={3}, detectedOrder={4}, sourcesQueried={5}, tieBreakOrder={6}",
-                context, searchInfo?.Path ?? referenceItem?.Path ?? "unavailable", mode,
-                options == null ? "unavailable" : string.Join(",", configuredEnabled),
-                options == null ? "unavailable" : string.Join(",", configuredOrder),
-                string.Join(",", sources), string.Join(",", tieBreakOrder));
+            this.logger.Info("LibraryProviderConfiguration {0}: context={1}, inputPath={2}, itemResolved={3}, optionsResolved={4}, seriesTypeOptions={5}, sourceMode={6}, detectedEnabled={7}, detectedOrder={8}, inheritedSources={9}, selectedSources={10}, tieBreakOrder={11}, fallbackReason={12}",
+                correlation, context, searchInfo?.Path ?? "<null>", referenceItem != null, options != null, seriesOptions != null, mode,
+                options == null ? "<unavailable>" : FormatList(configuredEnabled),
+                options == null ? "<unavailable>" : FormatList(configuredOrder),
+                FormatList(inheritedSources), FormatList(sources), FormatList(tieBreakOrder),
+                options != null ? "none" : mode == SeriesSearchSourceMode.Inherit ? "no-library-options" : "explicit-source-mode");
             return new SourcePlan { Sources = sources, TieBreakOrder = tieBreakOrder, HasLibraryConfiguration = options != null };
         }
 
-        private LibraryOptions FindLibraryOptionsByPath(string path)
+        private LibraryOptions FindLibraryOptionsByPath(string path, string correlation)
         {
-            if (string.IsNullOrWhiteSpace(path)) return null;
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                this.logger.Info("VirtualFolderLookup {0}: skipped; reason=search-path-empty", correlation);
+                return null;
+            }
             try
             {
                 var normalizedPath = NormalizePath(path);
-                return this.libraryManager.GetVirtualFolders()
-                    .Where(folder => folder?.LibraryOptions != null)
+                var folders = this.libraryManager.GetVirtualFolders()?.ToList() ?? new List<MediaBrowser.Model.Entities.VirtualFolderInfo>();
+                this.logger.Info("VirtualFolderLookup {0}: searchPath={1}, normalizedPath={2}, folderCount={3}", correlation, path, normalizedPath, folders.Count);
+                var matches = folders
+                    .Where(folder => folder != null)
                     .SelectMany(folder => (folder.Locations ?? Array.Empty<string>())
-                        .Where(location => IsPathWithin(normalizedPath, NormalizePath(location)))
-                        .Select(location => new { folder.LibraryOptions, Root = NormalizePath(location) }))
+                        .Where(location => !string.IsNullOrWhiteSpace(location))
+                        .Select(location => new { Folder = folder, Location = location, Root = NormalizePath(location) }))
+                    .ToList();
+                foreach (var candidate in matches)
+                {
+                    this.logger.Info("VirtualFolderCandidate {0}: name={1}, location={2}, normalizedRoot={3}, containsSearchPath={4}, hasLibraryOptions={5}",
+                        correlation, candidate.Folder.Name ?? "<null>", candidate.Location, candidate.Root,
+                        IsPathWithin(normalizedPath, candidate.Root), candidate.Folder.LibraryOptions != null);
+                }
+                var selected = matches
+                    .Where(candidate => candidate.Folder.LibraryOptions != null && IsPathWithin(normalizedPath, candidate.Root))
                     .OrderByDescending(match => match.Root.Length)
-                    .Select(match => match.LibraryOptions)
                     .FirstOrDefault();
+                if (selected == null)
+                {
+                    this.logger.Info("VirtualFolderLookup {0}: no match; reason={1}", correlation,
+                        matches.Count == 0 ? "no-configured-locations" : "no-containing-location-with-library-options");
+                    return null;
+                }
+                this.logger.Info("VirtualFolderLookup {0}: selected name={1}, location={2}", correlation, selected.Folder.Name, selected.Location);
+                return selected.Folder.LibraryOptions;
             }
             catch (Exception ex)
             {
-                this.logger.ErrorException("Could not resolve library options from series search path", ex);
+                this.logger.ErrorException("VirtualFolderLookup " + correlation + ": failed for search path " + path, ex);
                 return null;
             }
+        }
+
+        private static string FormatList(IEnumerable<string> values)
+        {
+            var list = values?.ToList() ?? new List<string>();
+            return list.Count == 0 ? "<empty>" : string.Join(",", list);
         }
 
         private static string NormalizePath(string path)
