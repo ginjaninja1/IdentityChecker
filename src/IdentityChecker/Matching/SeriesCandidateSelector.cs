@@ -40,7 +40,7 @@ namespace IdentityChecker.Matching
     public static class SeriesCandidateSelector
     {
         public static SeriesSelection Select(string name, int? year, IEnumerable<SeriesCandidate> candidates,
-            PluginConfiguration configuration, string preferredSource)
+            PluginConfiguration configuration, IReadOnlyList<string> sourceOrder)
         {
             var list = (candidates ?? Enumerable.Empty<SeriesCandidate>()).ToList();
             var titleWeight = ValidWeight(configuration.TitleWeight, 0.8);
@@ -56,17 +56,23 @@ namespace IdentityChecker.Matching
                 .ThenByDescending(x => x.TitleSimilarity >= 1.0)
                 .ThenByDescending(x => x.TitleSimilarity >= 1.0 && !year.HasValue ? x.YearScore : 0)
                 .ThenBy(x => year.HasValue ? x.YearDelta ?? int.MaxValue : 0)
-                .ThenBy(x => string.Equals(x.Candidate.Source, preferredSource, StringComparison.OrdinalIgnoreCase) ? 0 : 1)
+                .ThenBy(x => SourceOrderIndex(sourceOrder, x.Candidate.Source))
                 .ThenBy(x => x.Candidate.Position)
                 .ToList();
             var margin = ranked.Count > 1 ? ranked[0].TotalScore - ranked[1].TotalScore : (ranked.Count == 1 ? ranked[0].TotalScore : 0);
             string reason;
             SeriesCandidateScore selected = null;
             if (ranked.Count == 0) reason = "No candidates";
-            else if (ranked[0].TotalScore < Clamp(configuration.MinimumScore)) reason = "Top score below minimum";
-            else if (ranked.Count > 1 && margin < Clamp(configuration.MinimumScoreMargin)) reason = "Top candidates are too close";
-            else { selected = ranked[0]; reason = "Selected by score and deterministic tie-breaks"; }
+            else { selected = ranked[0]; reason = "Selected highest-ranked available candidate"; }
             return new SeriesSelection { Selected = selected, Ranked = ranked, Reason = reason, Margin = margin };
+        }
+
+        private static int SourceOrderIndex(IReadOnlyList<string> sourceOrder, string source)
+        {
+            if (sourceOrder == null) return int.MaxValue;
+            for (var i = 0; i < sourceOrder.Count; i++)
+                if (string.Equals(sourceOrder[i], source, StringComparison.OrdinalIgnoreCase)) return i;
+            return int.MaxValue;
         }
 
         private static SeriesCandidateScore Score(SeriesCandidate candidate, string input, int? year, int currentYear, double titleWeight, double yearWeight)

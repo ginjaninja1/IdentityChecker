@@ -8,8 +8,10 @@ using IdentityChecker.Configuration;
 using IdentityChecker.Matching;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Entities.TV;
+using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.Providers;
 using MediaBrowser.Common.Net;
+using MediaBrowser.Model.Configuration;
 using MediaBrowser.Model.Entities;
 using MediaBrowser.Model.Logging;
 using MediaBrowser.Model.Providers;
@@ -25,11 +27,13 @@ namespace IdentityChecker.Providers
         private const string TvdbId = "Tvdb";
         private const string TmdbId = "Tmdb";
         private readonly IProviderManager providerManager;
+        private readonly ILibraryManager libraryManager;
         private readonly ILogger logger;
 
-        public SeriesIdentityResolverProvider(IProviderManager providerManager, ILogManager logManager)
+        public SeriesIdentityResolverProvider(IProviderManager providerManager, ILibraryManager libraryManager, ILogManager logManager)
         {
             this.providerManager = providerManager;
+            this.libraryManager = libraryManager;
             this.logger = logManager.GetLogger(ProviderName);
         }
 
@@ -46,10 +50,12 @@ namespace IdentityChecker.Providers
             var config = GetConfiguration();
             if (!config.EnablePlugin) return Enumerable.Empty<RemoteSearchResult>();
             var correlation = Guid.NewGuid().ToString("N").Substring(0, 8);
+            var referenceItem = ResolveReferenceItem(searchInfo);
+            var sourcePlan = GetSourcePlan(config, referenceItem);
             this.logger.Info("ResolverStarted {0}: pathway=manual-search, name={1}, year={2}, source={3}, language={4}, country={5}",
                 correlation, searchInfo.Name, searchInfo.Year, config.SourceMode, searchInfo.MetadataLanguage, searchInfo.MetadataCountryCode);
-            var found = await Search(searchInfo, null, config, cancellationToken).ConfigureAwait(false);
-            var selection = SeriesCandidateSelector.Select(searchInfo.Name, searchInfo.Year, found.Select(x => x.Candidate), config, Tvdb);
+            var found = await Search(searchInfo, referenceItem, sourcePlan.Sources, config, cancellationToken).ConfigureAwait(false);
+            var selection = SeriesCandidateSelector.Select(searchInfo.Name, searchInfo.Year, found.Select(x => x.Candidate), config, sourcePlan.TieBreakOrder);
             LogSelection(correlation, selection, config);
             this.logger.Info("ResolverDecision {0}: manual-search returned={1}, selected={2}, reason={3}",
                 correlation, selection.Ranked.Count, selection.Selected?.Candidate.Name ?? "none", selection.Reason);
@@ -58,12 +64,12 @@ namespace IdentityChecker.Providers
 
         public async Task<MetadataResult<Series>> GetMetadata(SeriesInfo info, CancellationToken cancellationToken)
         {
-            return await Resolve(info, null, cancellationToken).ConfigureAwait(false);
+            return await Resolve(info, ResolveReferenceItem(info), cancellationToken).ConfigureAwait(false);
         }
 
         public async Task<MetadataResult<Series>> GetMetadata(RemoteMetadataFetchOptions<SeriesInfo> options, CancellationToken cancellationToken)
         {
-            return await Resolve(options.SearchInfo, null, cancellationToken).ConfigureAwait(false);
+            return await Resolve(options.SearchInfo, ResolveReferenceItem(options.SearchInfo), cancellationToken).ConfigureAwait(false);
         }
 
         private async Task<MetadataResult<Series>> Resolve(SeriesInfo info, BaseItem referenceItem, CancellationToken cancellationToken)
@@ -83,14 +89,15 @@ namespace IdentityChecker.Providers
                 return result;
             }
 
-            var found = await Search(info, referenceItem, config, cancellationToken).ConfigureAwait(false);
-            var selection = SeriesCandidateSelector.Select(info.Name, info.Year, found.Select(x => x.Candidate), config, Tvdb);
+            referenceItem = referenceItem ?? ResolveReferenceItem(info);
+            var sourcePlan = GetSourcePlan(config, referenceItem);
+            var found = await Search(info, referenceItem, sourcePlan.Sources, config, cancellationToken).ConfigureAwait(false);
+            var selection = SeriesCandidateSelector.Select(info.Name, info.Year, found.Select(x => x.Candidate), config, sourcePlan.TieBreakOrder);
             LogSelection(correlation, selection, config);
             var chosen = selection.Selected;
             if (chosen == null)
             {
-                this.logger.Info("ResolverDecision {0}: abstain ({1}), topScore={2:F3}, margin={3:F3}", correlation, selection.Reason,
-                    selection.Ranked.FirstOrDefault()?.TotalScore ?? 0, selection.Margin);
+                this.logger.Info("ResolverDecision {0}: no candidate available ({1})", correlation, selection.Reason);
                 return result;
             }
             this.logger.Info("ResolverDecision {0}: candidate={1}, source={2}, confidence={3:F3}, margin={4:F3}, reason={5}, apply={6}",
@@ -115,8 +122,7 @@ namespace IdentityChecker.Providers
             }
             if (selection.Selected == null)
             {
-                this.logger.Info("ResolverSelection {0}: abstain ({1}), topScore={2:F3}, margin={3:F3}", correlation, selection.Reason,
-                    selection.Ranked.FirstOrDefault()?.TotalScore ?? 0, selection.Margin);
+                this.logger.Info("ResolverSelection {0}: no candidate available ({1})", correlation, selection.Reason);
                 return;
             }
             this.logger.Info("ResolverSelection {0}: candidate={1}, source={2}, score={3:F3}, margin={4:F3}, reason={5}",
@@ -124,23 +130,25 @@ namespace IdentityChecker.Providers
                 selection.Selected.TotalScore, selection.Margin, selection.Reason);
         }
 
-        private async Task<List<ScoredCandidate>> Search(SeriesInfo info, BaseItem referenceItem, PluginConfiguration config, CancellationToken cancellationToken)
+        private async Task<List<ScoredCandidate>> Search(SeriesInfo info, BaseItem referenceItem, IReadOnlyList<string> sources,
+            PluginConfiguration config, CancellationToken cancellationToken)
         {
             var output = new List<ScoredCandidate>();
-            foreach (var source in GetSources(config.SourceMode))
+            foreach (var source in sources)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 var query = new RemoteSearchQuery<SeriesInfo> {
                     SearchInfo = info,
                     SearchProviderName = source,
-                    IncludeDisabledProviders = false
+                    ItemId = referenceItem?.InternalId ?? 0,
+                    IncludeDisabledProviders = config.SourceMode != SeriesSearchSourceMode.Inherit
                 };
                 var watch = Stopwatch.StartNew();
                 this.logger.Info("SearchStarted: provider={0}, name={1}, year={2}, language={3}, country={4}", source,
                     info.Name, info.Year, info.MetadataLanguage, info.MetadataCountryCode);
                 try
                 {
-                    // SDK 4.9 exposes only the query/token overload. The 4.11 reference-item overload is unavailable here.
+                    // Emby resolves ItemId to a reference item in ProviderManager, then applies that item's library options.
                     var results = (await this.providerManager.GetRemoteSearchResults<Series, SeriesInfo>(query, cancellationToken).ConfigureAwait(false)
                         ?? Enumerable.Empty<RemoteSearchResult>()).ToList();
                     this.logger.Info("SearchCompleted: provider={0}, status=ok, count={1}, durationMs={2}", source, results.Count, watch.ElapsedMilliseconds);
@@ -188,10 +196,100 @@ namespace IdentityChecker.Providers
                 .Select(g => g.First()).ToList();
         }
 
+        private BaseItem ResolveReferenceItem(SeriesInfo info)
+        {
+            if (info == null || string.IsNullOrWhiteSpace(info.Path)) return null;
+            try
+            {
+                var item = this.libraryManager.FindByPath(info.Path, true);
+                return item is Series ? item : null;
+            }
+            catch (Exception ex)
+            {
+                this.logger.ErrorException("Could not resolve series library context from path " + info.Path, ex);
+                return null;
+            }
+        }
+
+        private SourcePlan GetSourcePlan(PluginConfiguration config, BaseItem referenceItem)
+        {
+            LibraryOptions options = null;
+            TypeOptions seriesOptions = null;
+            if (referenceItem != null)
+            {
+                try
+                {
+                    options = this.libraryManager.GetLibraryOptions(referenceItem);
+                    seriesOptions = options?.GetTypeOptions("Series");
+                }
+                catch (Exception ex)
+                {
+                    this.logger.ErrorException("Could not read series library provider configuration", ex);
+                }
+            }
+
+            var configuredEnabled = (seriesOptions?.MetadataFetchers ?? Array.Empty<string>())
+                .Where(x => IsResolverSource(x)).ToList();
+            var configuredOrder = (seriesOptions?.MetadataFetcherOrder ?? Array.Empty<string>())
+                .Where(x => IsResolverSource(x)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            var inheritedSources = configuredEnabled
+                .OrderBy(x => ProviderOrder(configuredOrder, x))
+                .ThenBy(x => x, StringComparer.OrdinalIgnoreCase)
+                .Select(NormalizeSource)
+                .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+
+            var mode = config.SourceMode;
+            List<string> sources;
+            if (mode == SeriesSearchSourceMode.Inherit && referenceItem != null)
+            {
+                sources = inheritedSources;
+            }
+            else if (mode == SeriesSearchSourceMode.Inherit)
+            {
+                // Without a library reference, use the server's registered stock defaults available to this SDK call.
+                sources = new List<string> { Tvdb, Tmdb };
+            }
+            else
+            {
+                sources = GetSources(mode).ToList();
+            }
+
+            var tieBreakOrder = configuredOrder.Select(NormalizeSource).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            if (tieBreakOrder.Count == 0) tieBreakOrder.AddRange(inheritedSources);
+            if (tieBreakOrder.Count == 0) tieBreakOrder.AddRange(new[] { Tvdb, Tmdb });
+
+            var itemPath = referenceItem?.Path ?? "unavailable";
+            this.logger.Info("LibraryProviderConfiguration: context={0}, path={1}, sourceMode={2}, detectedEnabled={3}, detectedOrder={4}, sourcesQueried={5}, tieBreakOrder={6}",
+                referenceItem == null ? "unavailable" : "resolved", itemPath, mode,
+                referenceItem == null ? "unavailable" : string.Join(",", configuredEnabled),
+                referenceItem == null ? "unavailable" : string.Join(",", configuredOrder),
+                string.Join(",", sources), string.Join(",", tieBreakOrder));
+            return new SourcePlan { Sources = sources, TieBreakOrder = tieBreakOrder };
+        }
+
         private static IEnumerable<string> GetSources(SeriesSearchSourceMode mode)
         {
             if (mode == SeriesSearchSourceMode.Tvdb || mode == SeriesSearchSourceMode.Both) yield return Tvdb;
             if (mode == SeriesSearchSourceMode.Tmdb || mode == SeriesSearchSourceMode.Both) yield return Tmdb;
+        }
+
+        private static int ProviderOrder(IReadOnlyList<string> order, string provider)
+        {
+            for (var i = 0; i < order.Count; i++)
+                if (string.Equals(order[i], provider, StringComparison.OrdinalIgnoreCase)) return i;
+            return int.MaxValue;
+        }
+
+        private static bool IsResolverSource(string provider) =>
+            string.Equals(provider, Tvdb, StringComparison.OrdinalIgnoreCase) || string.Equals(provider, Tmdb, StringComparison.OrdinalIgnoreCase);
+
+        private static string NormalizeSource(string provider) =>
+            string.Equals(provider, Tvdb, StringComparison.OrdinalIgnoreCase) ? Tvdb : Tmdb;
+
+        private sealed class SourcePlan
+        {
+            public List<string> Sources { get; set; }
+            public List<string> TieBreakOrder { get; set; }
         }
 
         private static RemoteSearchResult ToSearchResult(SeriesCandidate c)

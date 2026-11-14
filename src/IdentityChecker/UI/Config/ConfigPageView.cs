@@ -47,13 +47,11 @@ namespace IdentityChecker.UI
                 if (incoming == null) return;
                 var config = Plugin.Instance.Configuration;
                 config.EnablePlugin = incoming.EnablePlugin;
-                config.SourceMode = Enum.IsDefined(typeof(SeriesSearchSourceMode), incoming.SourceMode) ? incoming.SourceMode : SeriesSearchSourceMode.Tvdb;
+                config.SourceMode = Enum.IsDefined(typeof(SeriesSearchSourceMode), incoming.SourceMode) ? incoming.SourceMode : SeriesSearchSourceMode.Inherit;
                 config.ApplySelectedIds = incoming.ApplySelectedIds;
                 config.TitleWeight = ValidWeight(incoming.TitleWeight, 0.8);
                 config.YearWeight = ValidWeight(incoming.YearWeight, 0.2);
                 if (config.TitleWeight + config.YearWeight <= 0) { config.TitleWeight = 0.8; config.YearWeight = 0.2; }
-                config.MinimumScore = Clamp(incoming.MinimumScore, 0.72);
-                config.MinimumScoreMargin = Clamp(incoming.MinimumScoreMargin, 0.08);
                 config.VerboseCandidateLogging = incoming.VerboseCandidateLogging;
                 Plugin.Instance.SaveConfiguration();
                 this.logger.Info("Series Identity Resolver configuration saved");
@@ -67,12 +65,11 @@ namespace IdentityChecker.UI
             var config = Plugin.Instance.Configuration;
             this.ContentData = new ConfigUI {
                 EnablePlugin = config.EnablePlugin, SourceMode = config.SourceMode, ApplySelectedIds = config.ApplySelectedIds,
-                TitleWeight = config.TitleWeight, YearWeight = config.YearWeight, MinimumScore = config.MinimumScore,
-                MinimumScoreMargin = config.MinimumScoreMargin, VerboseCandidateLogging = config.VerboseCandidateLogging
+                TitleWeight = config.TitleWeight, YearWeight = config.YearWeight,
+                VerboseCandidateLogging = config.VerboseCandidateLogging
             };
         }
 
         private static double ValidWeight(double value, double fallback) => double.IsNaN(value) || double.IsInfinity(value) || value < 0 ? fallback : value;
-        private static double Clamp(double value, double fallback) => double.IsNaN(value) || double.IsInfinity(value) ? fallback : Math.Max(0, Math.Min(1, value));
     }
 }
