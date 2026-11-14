@@ -17,9 +17,25 @@ namespace IdentityChecker.UI.Config
         [AutoPostBack("updateconfig", nameof(EnablePlugin))]
         public bool EnablePlugin { get; set; } = true;
 
+        public CaptionItem ManualHeading { get; set; } = new CaptionItem("Manual Pathway");
+
         [DisplayName("Search source")]
-        [AutoPostBack("updateconfig", nameof(SourceMode))]
-        public SeriesSearchSourceMode SourceMode { get; set; } = SeriesSearchSourceMode.Inherit;
+        [Description("Choose which catalogues the manual Identify search queries. Library provider settings are not available to this pathway.")]
+        [AutoPostBack("updateconfig", nameof(ManualSource))]
+        public ManualSeriesSearchSource ManualSource { get; set; } = ManualSeriesSearchSource.Both;
+
+        [DisplayName("Prefer on tie")]
+        [Description("When candidates score equally, prefer this catalogue.")]
+        [VisibleCondition(nameof(ManualSource), ValueCondition.IsEqual, ManualSeriesSearchSource.Both)]
+        [AutoPostBack("updateconfig", nameof(ManualPreferOnTie))]
+        public SeriesSearchTieBreakPreference ManualPreferOnTie { get; set; } = SeriesSearchTieBreakPreference.TheTVDB;
+
+        public CaptionItem AutomaticHeading { get; set; } = new CaptionItem("Automatic Pathway");
+
+        [DisplayName("Search source")]
+        [Description("Inherit uses the provider configuration for the series library when available.")]
+        [AutoPostBack("updateconfig", nameof(AutomaticSource))]
+        public AutomaticSeriesSearchSource AutomaticSource { get; set; } = AutomaticSeriesSearchSource.Inherit;
 
         [DisplayName("Apply selected IDs")]
         [Description("Off by default (dry run). Turn on to seed a confident TVDB/TMDB ID for Emby's stock metadata providers.")]

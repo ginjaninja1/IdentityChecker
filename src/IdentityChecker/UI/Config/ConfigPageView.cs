@@ -47,7 +47,12 @@ namespace IdentityChecker.UI
                 if (incoming == null) return;
                 var config = Plugin.Instance.Configuration;
                 config.EnablePlugin = incoming.EnablePlugin;
-                config.SourceMode = Enum.IsDefined(typeof(SeriesSearchSourceMode), incoming.SourceMode) ? incoming.SourceMode : SeriesSearchSourceMode.Inherit;
+                config.ManualSource = Enum.IsDefined(typeof(ManualSeriesSearchSource), incoming.ManualSource)
+                    ? incoming.ManualSource : ManualSeriesSearchSource.Both;
+                config.AutomaticSource = Enum.IsDefined(typeof(AutomaticSeriesSearchSource), incoming.AutomaticSource)
+                    ? incoming.AutomaticSource : AutomaticSeriesSearchSource.Inherit;
+                config.ManualPreferOnTie = Enum.IsDefined(typeof(SeriesSearchTieBreakPreference), incoming.ManualPreferOnTie)
+                    ? incoming.ManualPreferOnTie : SeriesSearchTieBreakPreference.TheTVDB;
                 config.ApplySelectedIds = incoming.ApplySelectedIds;
                 config.TitleWeight = ValidWeight(incoming.TitleWeight, 0.8);
                 config.YearWeight = ValidWeight(incoming.YearWeight, 0.2);
@@ -64,7 +69,9 @@ namespace IdentityChecker.UI
         {
             var config = Plugin.Instance.Configuration;
             this.ContentData = new ConfigUI {
-                EnablePlugin = config.EnablePlugin, SourceMode = config.SourceMode, ApplySelectedIds = config.ApplySelectedIds,
+                EnablePlugin = config.EnablePlugin, ManualSource = config.ManualSource,
+                AutomaticSource = config.AutomaticSource, ManualPreferOnTie = config.ManualPreferOnTie,
+                ApplySelectedIds = config.ApplySelectedIds,
                 TitleWeight = config.TitleWeight, YearWeight = config.YearWeight,
                 VerboseCandidateLogging = config.VerboseCandidateLogging
             };

@@ -53,10 +53,10 @@ namespace IdentityChecker.Matching
             var currentYear = DateTime.UtcNow.Year;
             var ranked = list.Select(candidate => Score(candidate, input, year, currentYear, titleWeight, yearWeight))
                 .OrderByDescending(x => x.TotalScore)
+                .ThenBy(x => SourceOrderIndex(sourceOrder, x.Candidate.Source))
                 .ThenByDescending(x => x.TitleSimilarity >= 1.0)
                 .ThenByDescending(x => x.TitleSimilarity >= 1.0 && !year.HasValue ? x.YearScore : 0)
                 .ThenBy(x => year.HasValue ? x.YearDelta ?? int.MaxValue : 0)
-                .ThenBy(x => SourceOrderIndex(sourceOrder, x.Candidate.Source))
                 .ThenBy(x => x.Candidate.Position)
                 .ToList();
             var margin = ranked.Count > 1 ? ranked[0].TotalScore - ranked[1].TotalScore : (ranked.Count == 1 ? ranked[0].TotalScore : 0);

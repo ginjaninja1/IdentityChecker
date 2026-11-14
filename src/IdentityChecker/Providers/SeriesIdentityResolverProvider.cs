@@ -56,12 +56,12 @@ namespace IdentityChecker.Providers
                 this.logger.Info("ResolverStarted {0}: pathway=manual-search, disabled=true; returning=0", correlation);
                 return Enumerable.Empty<RemoteSearchResult>();
             }
-            var referenceItem = ResolveReferenceItem(searchInfo, correlation);
-            var sourcePlan = GetSourcePlan(config, searchInfo, referenceItem, correlation);
+            // Emby's manual search callback receives only SeriesInfo; its API ItemId is not forwarded.
+            var sourcePlan = GetSourcePlan(config, searchInfo, null, correlation, manualPathway: true);
             this.logger.Info("ResolverStarted {0}: pathway=manual-search, name={1}, year={2}, source={3}, language={4}, country={5}",
-                correlation, searchInfo?.Name, searchInfo?.Year, config.SourceMode, searchInfo?.MetadataLanguage, searchInfo?.MetadataCountryCode);
-            var found = await Search(searchInfo, referenceItem, sourcePlan.Sources, config,
-                sourcePlan.HasLibraryConfiguration && referenceItem == null, cancellationToken).ConfigureAwait(false);
+                correlation, searchInfo?.Name, searchInfo?.Year, config.ManualSource, searchInfo?.MetadataLanguage, searchInfo?.MetadataCountryCode);
+            var found = await Search(searchInfo, null, sourcePlan.Sources,
+                sourcePlan.IncludeDisabledProviders, cancellationToken).ConfigureAwait(false);
             var selection = SeriesCandidateSelector.Select(searchInfo.Name, searchInfo.Year, found.Select(x => x.Candidate), config, sourcePlan.TieBreakOrder);
             LogSelection(correlation, selection, config);
             this.logger.Info("ResolverDecision {0}: manual-search returned={1}, selected={2}, reason={3}",
@@ -88,7 +88,7 @@ namespace IdentityChecker.Providers
             var tvdbExisting = GetProviderId(info, TvdbId);
             var tmdbExisting = GetProviderId(info, TmdbId);
             this.logger.Info("ResolverStarted {0}: name={1}, year={2}, tvdb={3}, tmdb={4}, source={5}, apply={6}, language={7}, country={8}",
-                correlation, info.Name, info.Year, tvdbExisting, tmdbExisting, config.SourceMode, config.ApplySelectedIds,
+                correlation, info.Name, info.Year, tvdbExisting, tmdbExisting, config.AutomaticSource, config.ApplySelectedIds,
                 info.MetadataLanguage, info.MetadataCountryCode);
             if (!string.IsNullOrWhiteSpace(tvdbExisting) || !string.IsNullOrWhiteSpace(tmdbExisting))
             {
@@ -97,9 +97,9 @@ namespace IdentityChecker.Providers
             }
 
             referenceItem = referenceItem ?? ResolveReferenceItem(info, correlation);
-            var sourcePlan = GetSourcePlan(config, info, referenceItem, correlation);
-            var found = await Search(info, referenceItem, sourcePlan.Sources, config,
-                sourcePlan.HasLibraryConfiguration && referenceItem == null, cancellationToken).ConfigureAwait(false);
+            var sourcePlan = GetSourcePlan(config, info, referenceItem, correlation, manualPathway: false);
+            var found = await Search(info, referenceItem, sourcePlan.Sources,
+                sourcePlan.IncludeDisabledProviders, cancellationToken).ConfigureAwait(false);
             var selection = SeriesCandidateSelector.Select(info.Name, info.Year, found.Select(x => x.Candidate), config, sourcePlan.TieBreakOrder);
             LogSelection(correlation, selection, config);
             var chosen = selection.Selected;
@@ -139,7 +139,7 @@ namespace IdentityChecker.Providers
         }
 
         private async Task<List<ScoredCandidate>> Search(SeriesInfo info, BaseItem referenceItem, IReadOnlyList<string> sources,
-            PluginConfiguration config, bool includeConfiguredSourcesDespiteManagerDefaults, CancellationToken cancellationToken)
+            bool includeConfiguredSourcesDespiteManagerDefaults, CancellationToken cancellationToken)
         {
             var output = new List<ScoredCandidate>();
             foreach (var source in sources)
@@ -149,7 +149,7 @@ namespace IdentityChecker.Providers
                     SearchInfo = info,
                     SearchProviderName = source,
                     ItemId = referenceItem?.InternalId ?? 0,
-                    IncludeDisabledProviders = config.SourceMode != SeriesSearchSourceMode.Inherit || includeConfiguredSourcesDespiteManagerDefaults
+                    IncludeDisabledProviders = includeConfiguredSourcesDespiteManagerDefaults
                 };
                 var watch = Stopwatch.StartNew();
                 this.logger.Info("SearchStarted: provider={0}, name={1}, year={2}, language={3}, country={4}", source,
@@ -209,7 +209,7 @@ namespace IdentityChecker.Providers
             if (info == null)
             {
                 this.logger.Info("ManualSearchInput {0}: info=null, pluginEnabled={1}, sourceMode={2}",
-                    correlation, config.EnablePlugin, config.SourceMode);
+                    correlation, config.EnablePlugin, config.ManualSource);
                 return;
             }
 
@@ -220,7 +220,7 @@ namespace IdentityChecker.Providers
                 correlation, info.GetType().FullName, info.Name ?? "<null>", info.Year,
                 info.Path ?? "<null>", info.Path == null, info.MetadataLanguage ?? "<null>",
                 info.MetadataCountryCode ?? "<null>", info.MetadataLanguages == null ? "null" : string.Join(",", info.MetadataLanguages.Select(x => x?.ThreeLetterISOLanguageName ?? x?.Name ?? "<null>")),
-                providerIds, config.SourceMode, config.EnablePlugin);
+                providerIds, config.ManualSource, config.EnablePlugin);
         }
 
         private BaseItem ResolveReferenceItem(SeriesInfo info, string correlation)
@@ -254,9 +254,12 @@ namespace IdentityChecker.Providers
             }
         }
 
-        private SourcePlan GetSourcePlan(PluginConfiguration config, SeriesInfo searchInfo, BaseItem referenceItem, string correlation)
+        private SourcePlan GetSourcePlan(PluginConfiguration config, SeriesInfo searchInfo, BaseItem referenceItem,
+            string correlation, bool manualPathway)
         {
-            LibraryOptions options = referenceItem == null ? FindLibraryOptionsByPath(searchInfo?.Path, correlation) : null;
+            LibraryOptions options = !manualPathway && referenceItem == null
+                ? FindLibraryOptionsByPath(searchInfo?.Path, correlation)
+                : null;
             TypeOptions seriesOptions = null;
             if (referenceItem != null)
             {
@@ -281,34 +284,52 @@ namespace IdentityChecker.Providers
                 .Select(NormalizeSource)
                 .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
 
-            var mode = config.SourceMode;
+            var automaticMode = config.AutomaticSource;
+            var mode = manualPathway ? config.ManualSource.ToString() : automaticMode.ToString();
             List<string> sources;
-            if (mode == SeriesSearchSourceMode.Inherit && options != null)
+            if (manualPathway)
+            {
+                sources = GetSources(config.ManualSource).ToList();
+            }
+            else if (automaticMode == AutomaticSeriesSearchSource.Inherit && options != null)
             {
                 sources = inheritedSources;
             }
-            else if (mode == SeriesSearchSourceMode.Inherit)
+            else if (automaticMode == AutomaticSeriesSearchSource.Inherit)
             {
                 // Without a library reference, use the server's registered stock defaults available to this SDK call.
                 sources = new List<string> { Tvdb, Tmdb };
             }
             else
             {
-                sources = GetSources(mode).ToList();
+                sources = GetSources(automaticMode).ToList();
             }
 
             var tieBreakOrder = configuredOrder.Select(NormalizeSource).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
             if (tieBreakOrder.Count == 0) tieBreakOrder.AddRange(inheritedSources);
+            if (manualPathway)
+            {
+                tieBreakOrder = config.ManualSource == ManualSeriesSearchSource.Both
+                    ? GetManualTieBreakOrder(config.ManualPreferOnTie).ToList()
+                    : sources.ToList();
+            }
             if (tieBreakOrder.Count == 0) tieBreakOrder.AddRange(new[] { Tvdb, Tmdb });
 
-            var context = referenceItem != null ? "item" : options != null ? "virtual-folder" : "unavailable";
-            this.logger.Info("LibraryProviderConfiguration {0}: context={1}, inputPath={2}, itemResolved={3}, optionsResolved={4}, seriesTypeOptions={5}, sourceMode={6}, detectedEnabled={7}, detectedOrder={8}, inheritedSources={9}, selectedSources={10}, tieBreakOrder={11}, fallbackReason={12}",
-                correlation, context, searchInfo?.Path ?? "<null>", referenceItem != null, options != null, seriesOptions != null, mode,
+            var context = manualPathway ? "not-forwarded-by-manual-provider-contract" :
+                referenceItem != null ? "item" : options != null ? "virtual-folder" : "unavailable";
+            this.logger.Info("LibraryProviderConfiguration {0}: pathway={1}, context={2}, inputPath={3}, itemResolved={4}, optionsResolved={5}, seriesTypeOptions={6}, sourceMode={7}, detectedEnabled={8}, detectedOrder={9}, inheritedSources={10}, selectedSources={11}, tieBreakOrder={12}, fallbackReason={13}",
+                correlation, manualPathway ? "manual" : "automatic", context, searchInfo?.Path ?? "<null>", referenceItem != null, options != null, seriesOptions != null, mode,
                 options == null ? "<unavailable>" : FormatList(configuredEnabled),
                 options == null ? "<unavailable>" : FormatList(configuredOrder),
                 FormatList(inheritedSources), FormatList(sources), FormatList(tieBreakOrder),
-                options != null ? "none" : mode == SeriesSearchSourceMode.Inherit ? "no-library-options" : "explicit-source-mode");
-            return new SourcePlan { Sources = sources, TieBreakOrder = tieBreakOrder, HasLibraryConfiguration = options != null };
+                manualPathway ? "manual-source-is-explicit" :
+                    options != null ? "none" : automaticMode == AutomaticSeriesSearchSource.Inherit ? "no-library-options" : "explicit-source-mode");
+            return new SourcePlan {
+                Sources = sources,
+                TieBreakOrder = tieBreakOrder,
+                IncludeDisabledProviders = manualPathway || automaticMode != AutomaticSeriesSearchSource.Inherit ||
+                    (options != null && referenceItem == null)
+            };
         }
 
         private LibraryOptions FindLibraryOptionsByPath(string path, string correlation)
@@ -379,10 +400,23 @@ namespace IdentityChecker.Providers
             return path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase);
         }
 
-        private static IEnumerable<string> GetSources(SeriesSearchSourceMode mode)
+        private static IReadOnlyList<string> GetManualTieBreakOrder(SeriesSearchTieBreakPreference preference)
         {
-            if (mode == SeriesSearchSourceMode.Tvdb || mode == SeriesSearchSourceMode.Both) yield return Tvdb;
-            if (mode == SeriesSearchSourceMode.Tmdb || mode == SeriesSearchSourceMode.Both) yield return Tmdb;
+            return preference == SeriesSearchTieBreakPreference.TheMovieDb
+                ? new[] { Tmdb, Tvdb }
+                : new[] { Tvdb, Tmdb };
+        }
+
+        private static IEnumerable<string> GetSources(ManualSeriesSearchSource source)
+        {
+            if (source == ManualSeriesSearchSource.TheTVDB || source == ManualSeriesSearchSource.Both) yield return Tvdb;
+            if (source == ManualSeriesSearchSource.TheMovieDb || source == ManualSeriesSearchSource.Both) yield return Tmdb;
+        }
+
+        private static IEnumerable<string> GetSources(AutomaticSeriesSearchSource source)
+        {
+            if (source == AutomaticSeriesSearchSource.TheTVDB || source == AutomaticSeriesSearchSource.Both) yield return Tvdb;
+            if (source == AutomaticSeriesSearchSource.TheMovieDb || source == AutomaticSeriesSearchSource.Both) yield return Tmdb;
         }
 
         private static int ProviderOrder(IReadOnlyList<string> order, string provider)
@@ -402,7 +436,7 @@ namespace IdentityChecker.Providers
         {
             public List<string> Sources { get; set; }
             public List<string> TieBreakOrder { get; set; }
-            public bool HasLibraryConfiguration { get; set; }
+            public bool IncludeDisabledProviders { get; set; }
         }
 
         private static RemoteSearchResult ToSearchResult(SeriesCandidate c)
