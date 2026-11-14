@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -51,10 +52,11 @@ namespace IdentityChecker.Providers
             if (!config.EnablePlugin) return Enumerable.Empty<RemoteSearchResult>();
             var correlation = Guid.NewGuid().ToString("N").Substring(0, 8);
             var referenceItem = ResolveReferenceItem(searchInfo);
-            var sourcePlan = GetSourcePlan(config, referenceItem);
+            var sourcePlan = GetSourcePlan(config, searchInfo, referenceItem);
             this.logger.Info("ResolverStarted {0}: pathway=manual-search, name={1}, year={2}, source={3}, language={4}, country={5}",
                 correlation, searchInfo.Name, searchInfo.Year, config.SourceMode, searchInfo.MetadataLanguage, searchInfo.MetadataCountryCode);
-            var found = await Search(searchInfo, referenceItem, sourcePlan.Sources, config, cancellationToken).ConfigureAwait(false);
+            var found = await Search(searchInfo, referenceItem, sourcePlan.Sources, config,
+                sourcePlan.HasLibraryConfiguration && referenceItem == null, cancellationToken).ConfigureAwait(false);
             var selection = SeriesCandidateSelector.Select(searchInfo.Name, searchInfo.Year, found.Select(x => x.Candidate), config, sourcePlan.TieBreakOrder);
             LogSelection(correlation, selection, config);
             this.logger.Info("ResolverDecision {0}: manual-search returned={1}, selected={2}, reason={3}",
@@ -90,8 +92,9 @@ namespace IdentityChecker.Providers
             }
 
             referenceItem = referenceItem ?? ResolveReferenceItem(info);
-            var sourcePlan = GetSourcePlan(config, referenceItem);
-            var found = await Search(info, referenceItem, sourcePlan.Sources, config, cancellationToken).ConfigureAwait(false);
+            var sourcePlan = GetSourcePlan(config, info, referenceItem);
+            var found = await Search(info, referenceItem, sourcePlan.Sources, config,
+                sourcePlan.HasLibraryConfiguration && referenceItem == null, cancellationToken).ConfigureAwait(false);
             var selection = SeriesCandidateSelector.Select(info.Name, info.Year, found.Select(x => x.Candidate), config, sourcePlan.TieBreakOrder);
             LogSelection(correlation, selection, config);
             var chosen = selection.Selected;
@@ -131,7 +134,7 @@ namespace IdentityChecker.Providers
         }
 
         private async Task<List<ScoredCandidate>> Search(SeriesInfo info, BaseItem referenceItem, IReadOnlyList<string> sources,
-            PluginConfiguration config, CancellationToken cancellationToken)
+            PluginConfiguration config, bool includeConfiguredSourcesDespiteManagerDefaults, CancellationToken cancellationToken)
         {
             var output = new List<ScoredCandidate>();
             foreach (var source in sources)
@@ -141,7 +144,7 @@ namespace IdentityChecker.Providers
                     SearchInfo = info,
                     SearchProviderName = source,
                     ItemId = referenceItem?.InternalId ?? 0,
-                    IncludeDisabledProviders = config.SourceMode != SeriesSearchSourceMode.Inherit
+                    IncludeDisabledProviders = config.SourceMode != SeriesSearchSourceMode.Inherit || includeConfiguredSourcesDespiteManagerDefaults
                 };
                 var watch = Stopwatch.StartNew();
                 this.logger.Info("SearchStarted: provider={0}, name={1}, year={2}, language={3}, country={4}", source,
@@ -211,22 +214,22 @@ namespace IdentityChecker.Providers
             }
         }
 
-        private SourcePlan GetSourcePlan(PluginConfiguration config, BaseItem referenceItem)
+        private SourcePlan GetSourcePlan(PluginConfiguration config, SeriesInfo searchInfo, BaseItem referenceItem)
         {
-            LibraryOptions options = null;
+            LibraryOptions options = referenceItem == null ? FindLibraryOptionsByPath(searchInfo?.Path) : null;
             TypeOptions seriesOptions = null;
             if (referenceItem != null)
             {
                 try
                 {
                     options = this.libraryManager.GetLibraryOptions(referenceItem);
-                    seriesOptions = options?.GetTypeOptions("Series");
                 }
                 catch (Exception ex)
                 {
                     this.logger.ErrorException("Could not read series library provider configuration", ex);
                 }
             }
+            seriesOptions = options?.GetTypeOptions("Series");
 
             var configuredEnabled = (seriesOptions?.MetadataFetchers ?? Array.Empty<string>())
                 .Where(x => IsResolverSource(x)).ToList();
@@ -240,7 +243,7 @@ namespace IdentityChecker.Providers
 
             var mode = config.SourceMode;
             List<string> sources;
-            if (mode == SeriesSearchSourceMode.Inherit && referenceItem != null)
+            if (mode == SeriesSearchSourceMode.Inherit && options != null)
             {
                 sources = inheritedSources;
             }
@@ -258,13 +261,53 @@ namespace IdentityChecker.Providers
             if (tieBreakOrder.Count == 0) tieBreakOrder.AddRange(inheritedSources);
             if (tieBreakOrder.Count == 0) tieBreakOrder.AddRange(new[] { Tvdb, Tmdb });
 
-            var itemPath = referenceItem?.Path ?? "unavailable";
+            var context = referenceItem != null ? "item" : options != null ? "virtual-folder" : "unavailable";
             this.logger.Info("LibraryProviderConfiguration: context={0}, path={1}, sourceMode={2}, detectedEnabled={3}, detectedOrder={4}, sourcesQueried={5}, tieBreakOrder={6}",
-                referenceItem == null ? "unavailable" : "resolved", itemPath, mode,
-                referenceItem == null ? "unavailable" : string.Join(",", configuredEnabled),
-                referenceItem == null ? "unavailable" : string.Join(",", configuredOrder),
+                context, searchInfo?.Path ?? referenceItem?.Path ?? "unavailable", mode,
+                options == null ? "unavailable" : string.Join(",", configuredEnabled),
+                options == null ? "unavailable" : string.Join(",", configuredOrder),
                 string.Join(",", sources), string.Join(",", tieBreakOrder));
-            return new SourcePlan { Sources = sources, TieBreakOrder = tieBreakOrder };
+            return new SourcePlan { Sources = sources, TieBreakOrder = tieBreakOrder, HasLibraryConfiguration = options != null };
+        }
+
+        private LibraryOptions FindLibraryOptionsByPath(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path)) return null;
+            try
+            {
+                var normalizedPath = NormalizePath(path);
+                return this.libraryManager.GetVirtualFolders()
+                    .Where(folder => folder?.LibraryOptions != null)
+                    .SelectMany(folder => (folder.Locations ?? Array.Empty<string>())
+                        .Where(location => IsPathWithin(normalizedPath, NormalizePath(location)))
+                        .Select(location => new { folder.LibraryOptions, Root = NormalizePath(location) }))
+                    .OrderByDescending(match => match.Root.Length)
+                    .Select(match => match.LibraryOptions)
+                    .FirstOrDefault();
+            }
+            catch (Exception ex)
+            {
+                this.logger.ErrorException("Could not resolve library options from series search path", ex);
+                return null;
+            }
+        }
+
+        private static string NormalizePath(string path)
+        {
+            var fullPath = Path.GetFullPath(path);
+            var root = Path.GetPathRoot(fullPath);
+            return fullPath.Length > (root?.Length ?? 0)
+                ? fullPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+                : fullPath;
+        }
+
+        private static bool IsPathWithin(string path, string root)
+        {
+            if (string.Equals(path, root, StringComparison.OrdinalIgnoreCase)) return true;
+            var prefix = root.EndsWith(Path.DirectorySeparatorChar.ToString(), StringComparison.Ordinal)
+                ? root
+                : root + Path.DirectorySeparatorChar;
+            return path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase);
         }
 
         private static IEnumerable<string> GetSources(SeriesSearchSourceMode mode)
@@ -290,6 +333,7 @@ namespace IdentityChecker.Providers
         {
             public List<string> Sources { get; set; }
             public List<string> TieBreakOrder { get; set; }
+            public bool HasLibraryConfiguration { get; set; }
         }
 
         private static RemoteSearchResult ToSearchResult(SeriesCandidate c)
