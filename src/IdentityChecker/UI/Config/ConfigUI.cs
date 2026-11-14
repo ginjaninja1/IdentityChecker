@@ -1,84 +1,37 @@
-﻿using Emby.Web.GenericEdit;
+using Emby.Web.GenericEdit;
 using Emby.Web.GenericEdit.Elements;
-using Emby.Web.GenericEdit.Elements.List;
 using MediaBrowser.Model.Attributes;
-using System.Collections.Generic;
 using System.ComponentModel;
+using IdentityChecker.Configuration;
 
 namespace IdentityChecker.UI.Config
 {
     public class ConfigUI : EditableOptionsBase
     {
-        public override string EditorTitle => "Poster To Folder - Configuration";
+        public override string EditorTitle => "Series Identity Resolver";
+        public override string EditorDescription => "Rank TVDB and TMDB series matches before Emby's standard metadata providers run.";
 
-        public override string EditorDescription =>
-            "Copies each movie/show's poster image to folder.ext on disk when a folder image is missing.";
+        public CaptionItem GeneralHeading { get; set; } = new CaptionItem("Resolver");
 
-        public CaptionItem GeneralHeading { get; set; } = new CaptionItem("General");
-
-        [DisplayName("Enable Plugin")]
-        [Description("When disabled, the scheduled task exits immediately without processing any items.")]
+        [DisplayName("Enable resolver")]
         [AutoPostBack("updateconfig", nameof(EnablePlugin))]
         public bool EnablePlugin { get; set; } = true;
 
-        public CaptionItem LibraryFilterHeading { get; set; } =
-            new CaptionItem("Library / Path Filter");
+        [DisplayName("Search source")]
+        public SeriesSearchSourceMode SourceMode { get; set; } = SeriesSearchSourceMode.Tvdb;
 
+        [DisplayName("Apply selected IDs")]
+        [Description("Off by default (dry run). Turn on to seed a confident TVDB/TMDB ID for Emby's stock metadata providers.")]
+        public bool ApplySelectedIds { get; set; }
 
-        /// <summary>
-        /// Persistent configuration data.
-        /// </summary>
-        [Browsable(false)]
-        public List<LibraryPathFilterItem> LibraryPaths { get; set; } =
-            new List<LibraryPathFilterItem>();
+        public CaptionItem ScoringHeading { get; set; } = new CaptionItem("Match confidence");
+        [DisplayName("Title weight")] public double TitleWeight { get; set; } = 0.8;
+        [DisplayName("Year weight")] public double YearWeight { get; set; } = 0.2;
+        [DisplayName("Minimum score")] public double MinimumScore { get; set; } = 0.72;
+        [DisplayName("Minimum margin")] public double MinimumScoreMargin { get; set; } = 0.08;
+        [DisplayName("Verbose candidate logging")]
+        public bool VerboseCandidateLogging { get; set; } = true;
 
-
-        /// <summary>
-        /// GenericUI representation of LibraryPaths.
-        /// </summary>
-        public GenericItemList LibraryList { get; set; } =
-            new GenericItemList();
-
-        /*
-        public GenericItemList ScheduledTaskLink { get; set; } = new GenericItemList
-        {
-            new GenericListItem
-            {
-                PrimaryText = "Configure Scheduled Task",
-                SecondaryText = "",
-                Icon = IconNames.link,
-                Status = ItemStatus.Succeeded,
-                HyperLink = "/scheduledtasks",
-                HyperLinkTargetExternal = true
-            }
-        };
-        */
-        public GenericItemList ScheduledTaskLink { get; set; } = new GenericItemList();
-
-        public GenericItemList ForumLink { get; set; } = new GenericItemList
-        {
-            new GenericListItem
-            {
-                PrimaryText = "Community Forum",
-                SecondaryText = "Issues, Suggestions and Updates",
-                Icon = IconNames.link,
-                Status = ItemStatus.Succeeded,
-                HyperLink = "https://emby.media/community/topic/148589-plugin-poster-to-folder/",
-                HyperLinkTargetExternal = true
-            }
-        };
-
-        public GenericItemList GithubLink { get; set; } = new GenericItemList
-        {
-            new GenericListItem
-            {
-                PrimaryText = "Github repository",
-                SecondaryText = "",
-                Icon = IconNames.link,
-                Status = ItemStatus.Succeeded,
-                HyperLink = "https://github.com/ginjaninja1/IdentityChecker",
-                HyperLinkTargetExternal = true
-            }
-        };
+        [Browsable(false)] public string Guidance => "Place this provider ahead of the selected stock provider to seed IDs during refresh. If placed after it, it is diagnostic only.";
     }
 }

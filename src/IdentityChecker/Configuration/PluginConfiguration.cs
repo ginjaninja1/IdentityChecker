@@ -1,30 +1,23 @@
-﻿using System.Collections.Generic;
 using MediaBrowser.Model.Plugins;
-using IdentityChecker.UI.Config;
 
 namespace IdentityChecker.Configuration
 {
-    /// <summary>
-    /// The plugin's persisted settings - and the ONLY class involved in
-    /// persistence. This uses Emby's standard BasePlugin&lt;T&gt; mechanism:
-    /// Plugin.Instance.Configuration / SaveConfiguration() / UpdateConfiguration(),
-    /// which serializes to XML in the plugin configurations folder
-    /// automatically. No custom store, no hand-rolled JSON round-trip.
-    ///
-    /// This class has no UI/visual members, by construction - it isn't
-    /// rendered by GenericEdit and is never assigned as ContentData, so
-    /// there's nothing for it to accidentally leak. The config page instead
-    /// builds a separate view-model, ConfigUI, fresh from this class every
-    /// time it's shown - see IdentityChecker.UI.Config.ConfigViewBuilder.
-    /// </summary>
+    public enum SeriesSearchSourceMode
+    {
+        Tvdb,
+        Tmdb,
+        Both
+    }
+
     public class PluginConfiguration : BasePluginConfiguration
     {
         public bool EnablePlugin { get; set; } = true;
-
-        /// <summary>
-        /// The real, persisted library/path filter data.
-        /// </summary>
-        public List<LibraryPathFilterItem> LibraryPaths { get; set; } =
-            new List<LibraryPathFilterItem>();
+        public SeriesSearchSourceMode SourceMode { get; set; } = SeriesSearchSourceMode.Tvdb;
+        public bool ApplySelectedIds { get; set; } = false;
+        public double TitleWeight { get; set; } = 0.8;
+        public double YearWeight { get; set; } = 0.2;
+        public double MinimumScore { get; set; } = 0.72;
+        public double MinimumScoreMargin { get; set; } = 0.08;
+        public bool VerboseCandidateLogging { get; set; } = true;
     }
 }

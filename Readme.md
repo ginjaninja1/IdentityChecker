@@ -1,28 +1,17 @@
-# IdentityChecker
+# Series Identity Resolver
 
-A standardized, automation-ready repository template for rapidly scaffolding Emby Server plugins. 
+An Emby series metadata provider that searches the configured TVDB and/or TMDB stock providers, ranks their results by title and year evidence, and optionally seeds a confident provider ID before Emby's normal metadata providers run. Stock providers remain responsible for fetching series metadata.
 
-## Features
-* **Zero-Configuration Scaffolding**: Uses automated GitHub Actions to rename namespaces, solution files, and projects instantly upon repository creation.
-* **.gitignore prepopulated**: To ensure obj, bin and .vs folders are excluded from repository
-* **setup.bat**: instantiates a pre-commit in `.git/hooks/` so any commit with "[bump]" at the END of description increases the the version number in .csproj.
-* **Working Plugin with thumbnail**: Ready to compile plugin with thumbnail, pluginui configuration page with autopostback (autosave) and task.
-* **launchSettings.json**: Ready to launch Emby with breakpoints for debugging
-* **Post Build Event**: Ready to copy compiled code to Emby plugins folder in current users %appdata%.
-* **Supress dependency file**: No value in copying this into plugins folder.
+## Setup
 
-## How to Instantiate a New Plugin
+Install the plugin and configure it from the plugin settings page. The default is TVDB-only dry-run mode: it logs candidate ordering and scoring but returns no IDs. Set **Apply selected IDs** to enable ID seeding. Keep this provider ahead of the selected stock provider in each series library's metadata downloader order; a provider placed later cannot prevent an earlier provider from selecting its first search result.
 
-This template is completely automated via the cloud. You do not need to use `dotnet new` or run local renaming commands.
+Existing TVDB or TMDB IDs are preserved. Low-confidence and near-tie matches abstain. In Both mode, candidate records are never joined by fuzzy title similarity; only IDs reported together by a stock result are carried together.
 
-1. Click the green **Use this template** button at the top of this GitHub page.
-2. Select **Create a new repository**.
-3. Name your repository using your new plugin's name (e.g., `MyNewPlugin`).
-4. Click **Create repository**.
+## Search behavior
 
-### What happens in the background:
-GitHub will instantly spin up a cloud action, read your repository name, and automatically update your folder paths, `.csproj`/`.slnx` filenames, and C# namespaces to match perfectly.
+The provider calls Emby's registered `TheTVDB` and `TheMovieDb` search providers. It never uses private credentials or makes direct API calls. The SDK available to this build exposes the manager search overload without a reference item, so library-specific enabled-provider filtering may follow server defaults until the project is built against a newer SDK exposing the reference-item overload.
 
-5. Open **GitHub Desktop** and clone your brand new repository down to your computer.
-6. Run \repositoryroot\setup.bat to instantiate the [bump] pre-commit hook.
-7. Launch the solution file inside `src/` and start coding immediately!
+## Build
+
+Build `src/IdentityChecker/IdentityChecker.csproj` with the .NET SDK. No post-build deployment occurs; install the generated plugin files using your normal Emby deployment process.

@@ -48,7 +48,7 @@ namespace IdentityChecker
 
 
         public override string Description =>
-            "Copies poster.ext to folder.ext for movies and TV shows that are missing a folder image.";
+            "Ranks TVDB and TMDB series matches and can seed selected provider IDs before metadata download.";
 
 
         public override Guid Id =>
@@ -56,7 +56,7 @@ namespace IdentityChecker
 
 
         public override string Name =>
-            "Poster To Folder";
+            "Series Identity Resolver";
 
 
         public ImageFormat ThumbImageFormat =>

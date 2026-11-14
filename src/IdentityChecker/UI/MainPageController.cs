@@ -4,19 +4,16 @@ using MediaBrowser.Model.Plugins;
 using MediaBrowser.Model.Plugins.UI;
 using MediaBrowser.Model.Plugins.UI.Views;
 using IdentityChecker.UIBaseClasses;
-using System.Collections.Generic;
 using System.Threading.Tasks;
 
 namespace IdentityChecker.UI
 {
-    internal class MainPageController : ControllerBase, IHasTabbedUIPages
+    internal class MainPageController : ControllerBase
     {
         private readonly PluginInfo pluginInfo;
         private readonly IServerApplicationHost applicationHost;
         private readonly ILogger logger;
 
-        private readonly List<IPluginUIPageController> tabPages =
-            new List<IPluginUIPageController>();
 
 
         public MainPageController(
@@ -33,8 +30,8 @@ namespace IdentityChecker.UI
             {
                 Name = "IdentityChecker",
                 EnableInMainMenu = false,
-                DisplayName = "Poster To Folder",
-                MenuIcon = "image",
+                DisplayName = "Series Identity Resolver",
+                MenuIcon = "search",
                 IsMainConfigPage = true
             };
         }
@@ -54,8 +51,9 @@ namespace IdentityChecker.UI
             return Task.FromResult(view);
         }
 
+        public System.Collections.Generic.IReadOnlyList<IPluginUIPageController> TabPageControllers =>
+            System.Array.Empty<IPluginUIPageController>();
 
-        public IReadOnlyList<IPluginUIPageController> TabPageControllers =>
-            this.tabPages.AsReadOnly();
+
     }
 }

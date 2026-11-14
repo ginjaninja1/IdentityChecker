@@ -1,0 +1,18 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2013/05/nuspec.xsd">
+  <metadata>
+    <id>MediaBrowser.Server.Core</id>
+    <version>4.9.1.90</version>
+    <title>Emby.Server.Core</title>
+    <authors>Emby Team</authors>
+    <owners>ebr,Luke</owners>
+    <requireLicenseAcceptance>false</requireLicenseAcceptance>
+    <projectUrl>https://github.com/MediaBrowser/Emby</projectUrl>
+    <iconUrl>http://www.mb3admin.com/images/mb3icons1-1.png</iconUrl>
+    <description>Contains core components required to build plugins for Emby Server.</description>
+    <copyright>Copyright © Emby 2023</copyright>
+    <dependencies>
+      <dependency id="MediaBrowser.Common" version="4.9.1.90" />
+    </dependencies>
+  </metadata>
+</package>
