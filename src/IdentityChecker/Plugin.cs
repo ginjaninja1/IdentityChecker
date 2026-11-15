@@ -1,4 +1,4 @@
-﻿using MediaBrowser.Common;
+using MediaBrowser.Common;
 using MediaBrowser.Common.Configuration;
 using MediaBrowser.Common.Plugins;
 using MediaBrowser.Controller;
@@ -6,13 +6,13 @@ using MediaBrowser.Model.Drawing;
 using MediaBrowser.Model.Logging;
 using MediaBrowser.Model.Plugins.UI;
 using MediaBrowser.Model.Serialization;
-using IdentityChecker.Configuration;
-using IdentityChecker.UI;
+using IdentityHelper.Configuration;
+using IdentityHelper.UI;
 using System;
 using System.Collections.Generic;
 using System.IO; 
 
-namespace IdentityChecker
+namespace IdentityHelper
 {
     public class Plugin : BasePlugin<PluginConfiguration>, IHasThumbImage, IHasUIPages
     {
@@ -56,7 +56,7 @@ namespace IdentityChecker
 
 
         public override string Name =>
-            "Series Identity Resolver";
+            "Identity Helper";
 
 
         public ImageFormat ThumbImageFormat =>
@@ -90,3 +90,4 @@ namespace IdentityChecker
         }
     }
 }
+

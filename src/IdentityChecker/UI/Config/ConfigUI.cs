@@ -2,13 +2,13 @@ using Emby.Web.GenericEdit;
 using Emby.Web.GenericEdit.Elements;
 using MediaBrowser.Model.Attributes;
 using System.ComponentModel;
-using IdentityChecker.Configuration;
+using IdentityHelper.Configuration;
 
-namespace IdentityChecker.UI.Config
+namespace IdentityHelper.UI.Config
 {
     public class ConfigUI : EditableOptionsBase
     {
-        public override string EditorTitle => "Series Identity Resolver";
+        public override string EditorTitle => "Identity Helper";
         public override string EditorDescription => "Rank TVDB and TMDB series matches before Emby's standard metadata providers run.";
 
         public CaptionItem GeneralHeading { get; set; } = new CaptionItem("Resolver");
@@ -58,3 +58,4 @@ namespace IdentityChecker.UI.Config
         [Browsable(false)] public string Guidance => "Place this provider ahead of the selected stock provider to seed IDs during refresh. If placed after it, it is diagnostic only.";
     }
 }
+

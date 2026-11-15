@@ -5,11 +5,11 @@ using MediaBrowser.Model.Logging;
 using MediaBrowser.Model.Plugins;
 using MediaBrowser.Model.Plugins.UI.Views;
 using MediaBrowser.Model.Serialization;
-using IdentityChecker.Configuration;
-using IdentityChecker.UIBaseClasses.Views;
-using IdentityChecker.UI.Config;
+using IdentityHelper.Configuration;
+using IdentityHelper.UIBaseClasses.Views;
+using IdentityHelper.UI.Config;
 
-namespace IdentityChecker.UI
+namespace IdentityHelper.UI
 {
     internal class ConfigPageView : PluginPageView
     {
@@ -59,9 +59,9 @@ namespace IdentityChecker.UI
                 if (config.TitleWeight + config.YearWeight <= 0) { config.TitleWeight = 0.8; config.YearWeight = 0.2; }
                 config.VerboseCandidateLogging = incoming.VerboseCandidateLogging;
                 Plugin.Instance.SaveConfiguration();
-                this.logger.Info("Series Identity Resolver configuration saved");
+                this.logger.Info("Identity Helper configuration saved");
             }
-            catch (Exception ex) { this.logger.ErrorException("Error saving Series Identity Resolver configuration", ex); }
+            catch (Exception ex) { this.logger.ErrorException("Error saving Identity Helper configuration", ex); }
             Rebuild();
         }
 
@@ -80,3 +80,4 @@ namespace IdentityChecker.UI
         private static double ValidWeight(double value, double fallback) => double.IsNaN(value) || double.IsInfinity(value) || value < 0 ? fallback : value;
     }
 }
+

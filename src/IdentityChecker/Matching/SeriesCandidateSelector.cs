@@ -3,9 +3,9 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Text;
-using IdentityChecker.Configuration;
+using IdentityHelper.Configuration;
 
-namespace IdentityChecker.Matching
+namespace IdentityHelper.Matching
 {
     public sealed class SeriesCandidate
     {

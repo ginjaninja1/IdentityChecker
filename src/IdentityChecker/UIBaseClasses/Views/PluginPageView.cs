@@ -1,7 +1,7 @@
-﻿using MediaBrowser.Model.Plugins.UI.Views;
+using MediaBrowser.Model.Plugins.UI.Views;
 using System.Threading.Tasks;
 
-namespace IdentityChecker.UIBaseClasses.Views
+namespace IdentityHelper.UIBaseClasses.Views
 {
     internal abstract class PluginPageView : PluginViewBase, IPluginPageView
     {

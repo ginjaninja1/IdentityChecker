@@ -5,8 +5,8 @@ using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using IdentityChecker.Configuration;
-using IdentityChecker.Matching;
+using IdentityHelper.Configuration;
+using IdentityHelper.Matching;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Entities.TV;
 using MediaBrowser.Controller.Library;
@@ -17,12 +17,12 @@ using MediaBrowser.Model.Entities;
 using MediaBrowser.Model.Logging;
 using MediaBrowser.Model.Providers;
 
-namespace IdentityChecker.Providers
+namespace IdentityHelper.Providers
 {
     /// <summary>Emby auto-discovers this class from its series metadata provider interface.</summary>
-    public sealed class SeriesIdentityResolverProvider : IRemoteMetadataProviderWithOptions<Series, SeriesInfo>, IHasOrder
+    public sealed class SeriesIdentityHelperProvider : IRemoteMetadataProviderWithOptions<Series, SeriesInfo>, IHasOrder
     {
-        private const string ProviderName = "Series Identity Resolver";
+        private const string ProviderName = "Identity Helper - Series";
         private const string Tvdb = "TheTVDB";
         private const string Tmdb = "TheMovieDb";
         private const string TvdbId = "Tvdb";
@@ -31,7 +31,7 @@ namespace IdentityChecker.Providers
         private readonly ILibraryManager libraryManager;
         private readonly ILogger logger;
 
-        public SeriesIdentityResolverProvider(IProviderManager providerManager, ILibraryManager libraryManager, ILogManager logManager)
+        public SeriesIdentityHelperProvider(IProviderManager providerManager, ILibraryManager libraryManager, ILogManager logManager)
         {
             this.providerManager = providerManager;
             this.libraryManager = libraryManager;
@@ -493,3 +493,5 @@ namespace IdentityChecker.Providers
         }
     }
 }
+
+

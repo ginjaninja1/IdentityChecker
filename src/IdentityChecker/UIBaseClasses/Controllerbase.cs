@@ -1,10 +1,10 @@
-﻿using MediaBrowser.Model.Plugins;
+using MediaBrowser.Model.Plugins;
 using MediaBrowser.Model.Plugins.UI;
 using MediaBrowser.Model.Plugins.UI.Views;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace IdentityChecker.UIBaseClasses
+namespace IdentityHelper.UIBaseClasses
 {
     public abstract class ControllerBase : IPluginUIPageController
     {

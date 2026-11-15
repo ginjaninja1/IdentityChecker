@@ -1,4 +1,4 @@
-﻿using MediaBrowser.Model.Dto;
+using MediaBrowser.Model.Dto;
 using MediaBrowser.Model.Events;
 using MediaBrowser.Model.GenericEdit;
 using MediaBrowser.Model.Plugins.UI.Views;
@@ -6,7 +6,7 @@ using MediaBrowser.Model.Plugins.UI.Views.Enums;
 using System;
 using System.Threading.Tasks;
 
-namespace IdentityChecker.UIBaseClasses.Views
+namespace IdentityHelper.UIBaseClasses.Views
 {
     internal abstract class PluginViewBase : IPluginUIView, IPluginViewWithOptions
     {

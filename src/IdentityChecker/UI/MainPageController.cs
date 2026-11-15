@@ -1,12 +1,12 @@
-﻿using MediaBrowser.Controller;
+using MediaBrowser.Controller;
 using MediaBrowser.Model.Logging;
 using MediaBrowser.Model.Plugins;
 using MediaBrowser.Model.Plugins.UI;
 using MediaBrowser.Model.Plugins.UI.Views;
-using IdentityChecker.UIBaseClasses;
+using IdentityHelper.UIBaseClasses;
 using System.Threading.Tasks;
 
-namespace IdentityChecker.UI
+namespace IdentityHelper.UI
 {
     internal class MainPageController : ControllerBase
     {
@@ -28,9 +28,9 @@ namespace IdentityChecker.UI
 
             this.PageInfo = new PluginPageInfo
             {
-                Name = "IdentityChecker",
+                Name = "IdentityHelper",
                 EnableInMainMenu = false,
-                DisplayName = "Series Identity Resolver",
+                DisplayName = "Identity Helper",
                 MenuIcon = "search",
                 IsMainConfigPage = true
             };
@@ -57,3 +57,4 @@ namespace IdentityChecker.UI
 
     }
 }
+

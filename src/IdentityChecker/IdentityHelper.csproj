@@ -1,11 +1,11 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFramework>netstandard2.0</TargetFramework>
-    <AssemblyName>IdentityChecker</AssemblyName>
-    <RootNamespace>IdentityChecker</RootNamespace>
+    <AssemblyName>IdentityHelper</AssemblyName>
+    <RootNamespace>IdentityHelper</RootNamespace>
     <LangVersion>latest</LangVersion>
-	  <Version>0.0.0.12</Version>
+	  <Version>0.0.0.13</Version>
 	  <Nullable>annotations</Nullable>
     
     
@@ -49,3 +49,4 @@
 
 
 </Project>
+

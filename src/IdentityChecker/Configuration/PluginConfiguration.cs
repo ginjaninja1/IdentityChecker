@@ -1,6 +1,6 @@
 using MediaBrowser.Model.Plugins;
 
-namespace IdentityChecker.Configuration
+namespace IdentityHelper.Configuration
 {
     public enum ManualSeriesSearchSource
     {

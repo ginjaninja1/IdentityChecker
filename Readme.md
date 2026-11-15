@@ -1,4 +1,4 @@
-# Series Identity Resolver
+# Identity Helper - Series
 
 An Emby series metadata provider that searches the configured TVDB and/or TMDB stock providers, ranks their results by title and year evidence, and optionally seeds the highest-ranked available provider ID before Emby's normal metadata providers run. Stock providers remain responsible for fetching series metadata.
 
@@ -15,3 +15,4 @@ The provider calls Emby's registered `TheTVDB` and `TheMovieDb` search providers
 ## Build
 
 Build `src/IdentityChecker/IdentityChecker.csproj` with the .NET SDK. No post-build deployment occurs; install the generated plugin files using your normal Emby deployment process.
+
