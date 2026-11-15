@@ -5,7 +5,7 @@
     <AssemblyName>IdentityHelper</AssemblyName>
     <RootNamespace>IdentityHelper</RootNamespace>
     <LangVersion>latest</LangVersion>
-	  <Version>0.0.0.13</Version>
+	  <Version>0.0.0.14</Version>
 	  <Nullable>annotations</Nullable>
     
     

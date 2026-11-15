@@ -182,7 +182,7 @@ Emit these events with one correlation ID per lookup:
 - `ResolverDecision`: selected IDs or abstention, confidence, margin, reason, dry-run/apply.
 - `IdSeeded`: only when actually returned; state explicitly that stock metadata fetchers will process the item next.
 
-Never log API keys, bearer tokens, authorization headers, or raw response payloads. Candidate detail logging can be controlled by `VerboseCandidateLogging`, default true during initial development; summary logging remains on. Errors should include provider, correlation ID, exception type/message, and elapsed time.
+Never log API keys, bearer tokens, authorization headers, or raw response payloads. Candidate scoring and detail records use Debug; resolver selection summaries with provider IDs use Info. Errors should include provider, correlation ID, exception type/message, and elapsed time.
 
 ## Configuration model and page
 
@@ -196,12 +196,11 @@ public double TitleWeight { get; set; } = 0.8;
 public double YearWeight { get; set; } = 0.2;
 public double MinimumScore { get; set; } = 0.72;
 public double MinimumScoreMargin { get; set; } = 0.08;
-public bool VerboseCandidateLogging { get; set; } = true;
 ```
 
 Create `SeriesSearchSourceMode` enum values `Tvdb`, `Tmdb`, `Both`. Validate weights (nonnegative, sum > 0) and thresholds (0..1); normalize weights at use time or reject invalid saved values safely.
 
-Adapt `ConfigUI` and `ConfigViewBuilder` to expose enable, source mode, apply/dry-run, weights, thresholds, and verbose logging. Every displayed setting should be copied to/from `PluginConfiguration` through `MainPageController`/existing config flow and saved with the existing `BasePlugin<PluginConfiguration>` mechanism. The config UI is not allowed to contain secrets or API-key fields.
+Adapt `ConfigUI` and `ConfigViewBuilder` to expose enable, source mode, apply/dry-run, weights, and thresholds. Every displayed setting should be copied to/from `PluginConfiguration` through `MainPageController`/existing config flow and saved with the existing `BasePlugin<PluginConfiguration>` mechanism. The config UI is not allowed to contain secrets or API-key fields.
 
 ## Implementation milestones
 

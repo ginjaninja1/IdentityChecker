@@ -32,6 +32,5 @@ namespace IdentityHelper.Configuration
         public bool ApplySelectedIds { get; set; } = false;
         public double TitleWeight { get; set; } = 0.8;
         public double YearWeight { get; set; } = 0.2;
-        public bool VerboseCandidateLogging { get; set; } = true;
     }
 }

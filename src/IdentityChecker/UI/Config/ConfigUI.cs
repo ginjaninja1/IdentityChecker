@@ -51,10 +51,6 @@ namespace IdentityHelper.UI.Config
         [AutoPostBack("updateconfig", nameof(YearWeight))]
         public double YearWeight { get; set; } = 0.2;
 
-        [DisplayName("Verbose candidate logging")]
-        [AutoPostBack("updateconfig", nameof(VerboseCandidateLogging))]
-        public bool VerboseCandidateLogging { get; set; } = true;
-
         [Browsable(false)] public string Guidance => "Place this provider ahead of the selected stock provider to seed IDs during refresh. If placed after it, it is diagnostic only.";
     }
 }

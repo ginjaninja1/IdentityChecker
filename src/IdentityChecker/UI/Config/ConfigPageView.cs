@@ -57,7 +57,6 @@ namespace IdentityHelper.UI
                 config.TitleWeight = ValidWeight(incoming.TitleWeight, 0.8);
                 config.YearWeight = ValidWeight(incoming.YearWeight, 0.2);
                 if (config.TitleWeight + config.YearWeight <= 0) { config.TitleWeight = 0.8; config.YearWeight = 0.2; }
-                config.VerboseCandidateLogging = incoming.VerboseCandidateLogging;
                 Plugin.Instance.SaveConfiguration();
                 this.logger.Info("Identity Helper configuration saved");
             }
@@ -72,8 +71,7 @@ namespace IdentityHelper.UI
                 EnablePlugin = config.EnablePlugin, ManualSource = config.ManualSource,
                 AutomaticSource = config.AutomaticSource, ManualPreferOnTie = config.ManualPreferOnTie,
                 ApplySelectedIds = config.ApplySelectedIds,
-                TitleWeight = config.TitleWeight, YearWeight = config.YearWeight,
-                VerboseCandidateLogging = config.VerboseCandidateLogging
+                TitleWeight = config.TitleWeight, YearWeight = config.YearWeight
             };
         }
 

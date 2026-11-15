@@ -65,9 +65,11 @@ namespace IdentityHelper.Providers
             var found = await Search(searchInfo, null, sourcePlan.Sources,
                 sourcePlan.IncludeDisabledProviders, cancellationToken).ConfigureAwait(false);
             var selection = SeriesCandidateSelector.Select(searchInfo.Name, searchInfo.Year, found.Select(x => x.Candidate), config, sourcePlan.TieBreakOrder);
-            LogSelection(correlation, selection, config);
-            this.logger.Info("ResolverDecision {0}: manual-search returned={1}, selected={2}, reason={3}",
-                correlation, selection.Ranked.Count, selection.Selected?.Candidate.Name ?? "none", selection.Reason);
+            LogSelection(correlation, selection);
+            var selected = selection.Selected?.Candidate;
+            this.logger.Info("ResolverDecision {0}: manual-search returned={1}, selected={2}, source={3}, tvdb={4}, tmdb={5}, reason={6}",
+                correlation, selection.Ranked.Count, selected?.Name ?? "none", selected?.Source ?? "none",
+                selected?.TvdbId ?? "none", selected?.TmdbId ?? "none", selection.Reason);
             return selection.Ranked
                 .Select(x => found.First(y => ReferenceEquals(y.Candidate, x.Candidate)).SearchResult)
                 .ToList();
@@ -105,15 +107,16 @@ namespace IdentityHelper.Providers
             var found = await Search(info, referenceItem, sourcePlan.Sources,
                 sourcePlan.IncludeDisabledProviders, cancellationToken).ConfigureAwait(false);
             var selection = SeriesCandidateSelector.Select(info.Name, info.Year, found.Select(x => x.Candidate), config, sourcePlan.TieBreakOrder);
-            LogSelection(correlation, selection, config);
+            LogSelection(correlation, selection);
             var chosen = selection.Selected;
             if (chosen == null)
             {
                 this.logger.Info("ResolverDecision {0}: no candidate available ({1})", correlation, selection.Reason);
                 return result;
             }
-            this.logger.Info("ResolverDecision {0}: candidate={1}, source={2}, confidence={3:F3}, margin={4:F3}, reason={5}, apply={6}",
-                correlation, chosen.Candidate.Name, chosen.Candidate.Source, chosen.TotalScore, selection.Margin, selection.Reason, config.ApplySelectedIds);
+            this.logger.Info("ResolverDecision {0}: candidate={1}, source={2}, tvdb={3}, tmdb={4}, confidence={5:F3}, margin={6:F3}, reason={7}, apply={8}",
+                correlation, chosen.Candidate.Name, chosen.Candidate.Source, chosen.Candidate.TvdbId ?? "none", chosen.Candidate.TmdbId ?? "none",
+                chosen.TotalScore, selection.Margin, selection.Reason, config.ApplySelectedIds);
             if (!config.ApplySelectedIds) return result;
             if (!string.IsNullOrWhiteSpace(chosen.Candidate.TvdbId)) result.Item.SetProviderId(TvdbId, chosen.Candidate.TvdbId);
             if (!string.IsNullOrWhiteSpace(chosen.Candidate.TmdbId)) result.Item.SetProviderId(TmdbId, chosen.Candidate.TmdbId);
@@ -122,14 +125,14 @@ namespace IdentityHelper.Providers
             return result;
         }
 
-        private void LogSelection(string correlation, SeriesSelection selection, PluginConfiguration config)
+        private void LogSelection(string correlation, SeriesSelection selection)
         {
             foreach (var s in selection.Ranked)
             {
-                this.logger.Info("CandidateScore {0}: provider={1}, title={2}, normalized={3}/{4}, distance={5}, titleScore={6:F3}, yearDelta={7}, yearScore={8:F3}, total={9:F3}",
+                this.logger.Debug("CandidateScore {0}: provider={1}, title={2}, normalized={3}/{4}, distance={5}, titleScore={6:F3}, yearDelta={7}, yearScore={8:F3}, total={9:F3}",
                     correlation, s.Candidate.Source, s.Candidate.Name, s.NormalizedInput, s.NormalizedCandidate, s.EditDistance,
                     s.TitleSimilarity, s.YearDelta, s.YearScore, s.TotalScore);
-                if (config.VerboseCandidateLogging) this.logger.Info("Candidate {0}: source={1}, position={2}, title={3}, year={4}, tvdb={5}, tmdb={6}",
+                this.logger.Debug("Candidate {0}: source={1}, position={2}, title={3}, year={4}, tvdb={5}, tmdb={6}",
                     correlation, s.Candidate.Source, s.Candidate.Position, s.Candidate.Name, s.Candidate.Year, s.Candidate.TvdbId, s.Candidate.TmdbId);
             }
             if (selection.Selected == null)
@@ -137,8 +140,9 @@ namespace IdentityHelper.Providers
                 this.logger.Info("ResolverSelection {0}: no candidate available ({1})", correlation, selection.Reason);
                 return;
             }
-            this.logger.Info("ResolverSelection {0}: candidate={1}, source={2}, score={3:F3}, margin={4:F3}, reason={5}",
+            this.logger.Info("ResolverSelection {0}: candidate={1}, source={2}, tvdb={3}, tmdb={4}, score={5:F3}, margin={6:F3}, reason={7}",
                 correlation, selection.Selected.Candidate.Name, selection.Selected.Candidate.Source,
+                selection.Selected.Candidate.TvdbId ?? "none", selection.Selected.Candidate.TmdbId ?? "none",
                 selection.Selected.TotalScore, selection.Margin, selection.Reason);
         }
 
