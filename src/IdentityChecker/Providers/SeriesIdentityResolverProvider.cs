@@ -274,9 +274,14 @@ namespace IdentityChecker.Providers
             }
             seriesOptions = options?.GetTypeOptions("Series");
 
-            var configuredEnabled = (seriesOptions?.MetadataFetchers ?? Array.Empty<string>())
+            // Preserve the library's actual order for diagnostics. The provider manager
+            // orders all metadata providers using their exact Name, and filters/order
+            // only the resolver's candidate sources after reading that configuration.
+            var rawFetcherNames = seriesOptions?.MetadataFetchers ?? Array.Empty<string>();
+            var rawFetcherOrder = seriesOptions?.MetadataFetcherOrder ?? Array.Empty<string>();
+            var configuredEnabled = rawFetcherNames
                 .Where(x => IsResolverSource(x)).ToList();
-            var configuredOrder = (seriesOptions?.MetadataFetcherOrder ?? Array.Empty<string>())
+            var configuredOrder = rawFetcherOrder
                 .Where(x => IsResolverSource(x)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
             var inheritedSources = configuredEnabled
                 .OrderBy(x => ProviderOrder(configuredOrder, x))
@@ -317,11 +322,16 @@ namespace IdentityChecker.Providers
 
             var context = manualPathway ? "not-forwarded-by-manual-provider-contract" :
                 referenceItem != null ? "item" : options != null ? "virtual-folder" : "unavailable";
-            this.logger.Info("LibraryProviderConfiguration {0}: pathway={1}, context={2}, inputPath={3}, itemResolved={4}, optionsResolved={5}, seriesTypeOptions={6}, sourceMode={7}, detectedEnabled={8}, detectedOrder={9}, inheritedSources={10}, selectedSources={11}, tieBreakOrder={12}, fallbackReason={13}",
+            var rawOrderStatus = options == null ? "library-options-unavailable" : seriesOptions == null ? "series-type-options-unavailable" :
+                rawFetcherOrder.Length == 0 ? "metadata-fetcher-order-empty" : "metadata-fetcher-order-read";
+            var filteredOrderStatus = options == null ? "not-read" : seriesOptions == null ? "not-read" :
+                configuredOrder.Count == 0 ? "no-tvdb-tmdb-name-match" : "matched-tvdb-tmdb";
+            this.logger.Info("LibraryProviderConfiguration {0}: pathway={1}, context={2}, inputPath={3}, itemResolved={4}, optionsResolved={5}, seriesTypeOptions={6}, sourceMode={7}, detectedEnabled={8}, detectedOrder={9}, detectedOrderStatus={10}, metadataFetcherOrderRaw={11}, metadataFetcherOrderFilterStatus={12}, metadataFetcherNamesRaw={13}, inheritedSources={14}, selectedSources={15}, tieBreakOrder={16}, fallbackReason={17}",
                 correlation, manualPathway ? "manual" : "automatic", context, searchInfo?.Path ?? "<null>", referenceItem != null, options != null, seriesOptions != null, mode,
                 options == null ? "<unavailable>" : FormatList(configuredEnabled),
                 options == null ? "<unavailable>" : FormatList(configuredOrder),
-                FormatList(inheritedSources), FormatList(sources), FormatList(tieBreakOrder),
+                rawOrderStatus, options == null ? "<unavailable>" : FormatList(rawFetcherOrder), filteredOrderStatus,
+                options == null ? "<unavailable>" : FormatList(rawFetcherNames), FormatList(inheritedSources), FormatList(sources), FormatList(tieBreakOrder),
                 manualPathway ? "manual-source-is-explicit" :
                     options != null ? "none" : automaticMode == AutomaticSeriesSearchSource.Inherit ? "no-library-options" : "explicit-source-mode");
             return new SourcePlan {
