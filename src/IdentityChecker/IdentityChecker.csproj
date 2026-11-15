@@ -5,7 +5,7 @@
     <AssemblyName>IdentityChecker</AssemblyName>
     <RootNamespace>IdentityChecker</RootNamespace>
     <LangVersion>latest</LangVersion>
-	  <Version>0.0.0.11</Version>
+	  <Version>0.0.0.12</Version>
 	  <Nullable>annotations</Nullable>
     
     

@@ -43,6 +43,8 @@ namespace IdentityChecker.Providers
 
         public Task<HttpResponseInfo> GetImageResponse(string url, CancellationToken cancellationToken)
         {
+            // Results returned by this provider retain the stock SearchProviderName,
+            // so Emby requests their preview directly from the stock provider.
             return Task.FromResult<HttpResponseInfo>(null);
         }
 
@@ -66,7 +68,9 @@ namespace IdentityChecker.Providers
             LogSelection(correlation, selection, config);
             this.logger.Info("ResolverDecision {0}: manual-search returned={1}, selected={2}, reason={3}",
                 correlation, selection.Ranked.Count, selection.Selected?.Candidate.Name ?? "none", selection.Reason);
-            return selection.Ranked.Select(x => ToSearchResult(x.Candidate)).ToList();
+            return selection.Ranked
+                .Select(x => found.First(y => ReferenceEquals(y.Candidate, x.Candidate)).SearchResult)
+                .ToList();
         }
 
         public async Task<MetadataResult<Series>> GetMetadata(SeriesInfo info, CancellationToken cancellationToken)
@@ -188,9 +192,15 @@ namespace IdentityChecker.Providers
                                 if (!string.IsNullOrWhiteSpace(same.TvdbId)) combined.TvdbId = same.TvdbId;
                                 if (!string.IsNullOrWhiteSpace(same.TmdbId)) combined.TmdbId = same.TmdbId;
                             }
-                            output.Add(new ScoredCandidate { Candidate = combined });
+                            output.Add(new ScoredCandidate {
+                                Candidate = combined,
+                                SearchResult = FindSearchResult(results, source, combined)
+                            });
                         }
-                        else output.AddRange(sourceCandidates.Select(c => new ScoredCandidate { Candidate = c }));
+                        else output.AddRange(sourceCandidates.Select(c => new ScoredCandidate {
+                            Candidate = c,
+                            SearchResult = FindSearchResult(results, source, c)
+                        }));
                     }
                     if (results.Count == 0) this.logger.Info("SearchCompleted: provider={0}, no candidates (provider may be disabled for this library)", source);
                 }
@@ -454,22 +464,32 @@ namespace IdentityChecker.Providers
             public bool IncludeDisabledProviders { get; set; }
         }
 
-        private static RemoteSearchResult ToSearchResult(SeriesCandidate c)
-        {
-            var result = new RemoteSearchResult { Name = c.Name, ProductionYear = c.Year, SearchProviderName = c.Source };
-            if (!string.IsNullOrWhiteSpace(c.TvdbId)) result.SetProviderId(TvdbId, c.TvdbId);
-            if (!string.IsNullOrWhiteSpace(c.TmdbId)) result.SetProviderId(TmdbId, c.TmdbId);
-            return result;
-        }
-
         private static string GetProviderId(SeriesInfo info, string id)
         {
             string value;
             return info.ProviderIds != null && info.ProviderIds.TryGetValue(id, out value) ? value : null;
         }
 
+        private static RemoteSearchResult FindSearchResult(IEnumerable<RemoteSearchResult> results, string source, SeriesCandidate candidate)
+        {
+            var providerId = source == Tvdb ? candidate.TvdbId : candidate.TmdbId;
+            var providerKey = source == Tvdb ? TvdbId : TmdbId;
+            return results.First(r => string.Equals(GetProviderId(r.ProviderIds, providerKey), providerId, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static string GetProviderId(IDictionary<string, string> providerIds, string id)
+        {
+            string value;
+            return providerIds != null && providerIds.TryGetValue(id, out value) ? value : null;
+        }
+
         private static PluginConfiguration GetConfiguration() => Plugin.Instance?.Configuration ?? new PluginConfiguration();
 
-        private sealed class ScoredCandidate { public SeriesCandidate Candidate { get; set; } public SeriesCandidateScore Score { get; set; } }
+        private sealed class ScoredCandidate
+        {
+            public SeriesCandidate Candidate { get; set; }
+            public RemoteSearchResult SearchResult { get; set; }
+            public SeriesCandidateScore Score { get; set; }
+        }
     }
 }
