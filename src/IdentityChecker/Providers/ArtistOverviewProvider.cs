@@ -6,7 +6,6 @@ using System.Threading.Tasks;
 using MediaBrowser.Common.Net;
 using MediaBrowser.Controller.Entities.Audio;
 using MediaBrowser.Controller.Providers;
-using MediaBrowser.Model.Entities;
 using MediaBrowser.Model.Logging;
 using MediaBrowser.Model.Providers;
 using MediaBrowser.Model.Serialization;
@@ -21,7 +20,7 @@ namespace IdentityHelper.Providers
     {
         private const string ProviderName = "Identity Helper - Artist";
         private const string DiscogsArtistId = "DiscogsArtist";
-        private static readonly TimeSpan PostFetchDelay = TimeSpan.FromSeconds(5);
+        private static readonly TimeSpan PostFetchDelay = TimeSpan.FromSeconds(2);
         private readonly IHttpClient httpClient;
         private readonly IJsonSerializer json;
         private readonly ILogger logger;
@@ -48,14 +47,6 @@ namespace IdentityHelper.Providers
         {
             var result = new MetadataResult<MusicArtist> { Item = new MusicArtist() };
             var discogsId = GetProviderId(info, DiscogsArtistId);
-            this.logger.Info("Artist lookup lock state: isLocked={0}, overviewLocked={1}, lockedFields={2}",
-                info?.IsLocked ?? false,
-                info != null && (info.IsLocked || Array.IndexOf(info.LockedFields ?? Array.Empty<MetadataFields>(), MetadataFields.Overview) >= 0),
-                info?.LockedFields == null ? "<none>" : string.Join(",", info.LockedFields));
-            if (info != null && (info.IsLocked || Array.IndexOf(info.LockedFields ?? Array.Empty<MetadataFields>(), MetadataFields.Overview) >= 0))
-            {
-                this.logger.Warn("Emby has Overview locked for this artist. The fetched overview will be returned, but Emby's metadata merge may not save it until the field is unlocked.");
-            }
             this.logger.Info("Artist overview fetch started: name={0}, discogsId={1}, providerIds={2}",
                 info?.Name ?? "<null>", discogsId ?? "<missing>",
                 info?.ProviderIds == null ? 0 : info.ProviderIds.Count);
