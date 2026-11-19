@@ -43,7 +43,7 @@
 		<GenerateDependencyFile>false</GenerateDependencyFile>
 	</PropertyGroup>
 	
-	<Target Name="PostBuild" AfterTargets="PostBuildEvent" Condition="'$(DeployToEmby)' == 'true'">
+	<Target Name="PostBuild" AfterTargets="PostBuildEvent">
 		<Exec Command="xcopy &quot;$(TargetDir)$(TargetName).*&quot; &quot;$(APPDATA)\Emby-Server\programdata\plugins\&quot; /Y" />
 	</Target>
 

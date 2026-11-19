@@ -46,11 +46,18 @@ namespace IdentityHelper.Providers
         {
             var result = new MetadataResult<MusicArtist> { Item = new MusicArtist() };
             var discogsId = GetProviderId(info, DiscogsArtistId);
-            if (string.IsNullOrWhiteSpace(discogsId)) return result;
+            this.logger.Info("Artist overview fetch started: name={0}, discogsId={1}, providerIds={2}",
+                info?.Name ?? "<null>", discogsId ?? "<missing>",
+                info?.ProviderIds == null ? 0 : info.ProviderIds.Count);
+            if (string.IsNullOrWhiteSpace(discogsId))
+            {
+                this.logger.Warn("No DiscogsArtist ID was available; returning no metadata.");
+                return result;
+            }
 
             if (!Regex.IsMatch(discogsId, @"^\d+$"))
             {
-                this.logger.Warn("Skipping invalid Discogs artist ID: {0}", discogsId);
+                this.logger.Warn("Invalid DiscogsArtist ID '{0}'; expected digits only.", discogsId);
                 return result;
             }
 
@@ -64,21 +71,39 @@ namespace IdentityHelper.Providers
 
             try
             {
+                this.logger.Debug("Requesting Discogs artist profile: id={0}, url={1}", discogsId, request.Url);
                 using (var response = await this.httpClient.SendAsync(request, "GET").ConfigureAwait(false))
                 {
+                    this.logger.Info("Discogs response received: id={0}, status={1}, contentLength={2}",
+                        discogsId, response.StatusCode, response.ContentLength);
                     var artist = await this.json.DeserializeFromStreamAsync<DiscogsArtist>(response.Content).ConfigureAwait(false);
-                    if (artist == null || string.IsNullOrWhiteSpace(artist.Profile)) return result;
+                    if (artist == null)
+                    {
+                        this.logger.Warn("Discogs response deserialized to null for artist ID {0}.", discogsId);
+                        return result;
+                    }
 
-                    result.Item.Overview = FlattenMarkdownLinks(artist.Profile);
+                    var profile = artist.Profile;
+                    this.logger.Info("Discogs profile parsed: id={0}, responseName={1}, profileNull={2}, profileLength={3}",
+                        discogsId, artist.Name ?? "<missing>", profile == null, profile?.Length ?? 0);
+                    if (string.IsNullOrWhiteSpace(profile))
+                    {
+                        this.logger.Warn("Discogs profile was empty for artist ID {0}; returning no metadata.", discogsId);
+                        return result;
+                    }
+
+                    result.Item.Overview = FlattenMarkdownLinks(profile);
                     result.HasMetadata = !string.IsNullOrWhiteSpace(result.Item.Overview);
-                    if (result.HasMetadata)
-                        this.logger.Info("Fetched Discogs overview for artist ID {0}", discogsId);
+                    this.logger.Info("Artist overview result ready: id={0}, overviewLength={1}, hasMetadata={2}",
+                        discogsId, result.Item.Overview?.Length ?? 0, result.HasMetadata);
                     return result;
                 }
             }
             catch (OperationCanceledException) { throw; }
             catch (Exception ex)
             {
+                this.logger.ErrorException("Artist overview fetch failed for ID " + discogsId, ex);
+                // Keep this legacy message searchable when comparing older log excerpts.
                 this.logger.ErrorException("Unable to fetch Discogs artist overview for ID " + discogsId, ex);
                 return result;
             }
@@ -94,14 +119,18 @@ namespace IdentityHelper.Providers
             return Task.FromResult<HttpResponseInfo>(null);
         }
 
-        /// <summary>Changes [display text](URL) to display text; retains all other profile text.</summary>
+        /// <summary>Converts Discogs Markdown links and artist references to visible text.</summary>
         internal static string FlattenMarkdownLinks(string profile)
         {
             if (string.IsNullOrEmpty(profile)) return profile;
 
-            // Match balanced brackets/parentheses for common Markdown link text and URLs.
-            // The URL and Markdown delimiters are removed; visible label text is preserved.
+            // Discogs profiles use [a=Artist Name] for artist references and Markdown for links.
+            // Preserve visible text while removing only the link/reference markup.
             var result = Regex.Replace(profile,
+                @"\[a=(?<label>[^\]]+)\]",
+                match => match.Groups["label"].Value,
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+            result = Regex.Replace(result,
                 @"\[(?<label>(?:[^\[\]]|\[[^\[\]]*\])*)\]\((?<url>(?:[^()]|\([^()]*\))*)\)",
                 match => match.Groups["label"].Value,
                 RegexOptions.CultureInvariant);
@@ -116,7 +145,9 @@ namespace IdentityHelper.Providers
 
         private sealed class DiscogsArtist
         {
+            public string name { get; set; }
             public string profile { get; set; }
+            public string Name { get { return this.name; } }
             public string Profile { get { return this.profile; } }
         }
     }
