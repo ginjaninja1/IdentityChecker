@@ -10,3 +10,5 @@
 # Visual Studio cache folders
 **/.vs/
 /.inspect-emby
+/.provider-review/Providers
+/_inspect
