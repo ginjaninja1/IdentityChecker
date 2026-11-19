@@ -5,7 +5,7 @@
     <AssemblyName>IdentityHelper</AssemblyName>
     <RootNamespace>IdentityHelper</RootNamespace>
     <LangVersion>latest</LangVersion>
-	  <Version>0.0.0.14</Version>
+	  <Version>0.0.0.15</Version>
 	  <Nullable>annotations</Nullable>
     
     
@@ -43,7 +43,7 @@
 		<GenerateDependencyFile>false</GenerateDependencyFile>
 	</PropertyGroup>
 	
-	<Target Name="PostBuild" AfterTargets="PostBuildEvent">
+	<Target Name="PostBuild" AfterTargets="PostBuildEvent" Condition="'$(DeployToEmby)' == 'true'">
 		<Exec Command="xcopy &quot;$(TargetDir)$(TargetName).*&quot; &quot;$(APPDATA)\Emby-Server\programdata\plugins\&quot; /Y" />
 	</Target>
 
