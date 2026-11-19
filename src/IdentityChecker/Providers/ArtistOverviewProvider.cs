@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using MediaBrowser.Common.Net;
 using MediaBrowser.Controller.Entities.Audio;
 using MediaBrowser.Controller.Providers;
+using MediaBrowser.Model.Entities;
 using MediaBrowser.Model.Logging;
 using MediaBrowser.Model.Providers;
 using MediaBrowser.Model.Serialization;
@@ -18,8 +19,9 @@ namespace IdentityHelper.Providers
     /// </summary>
     public sealed class ArtistOverviewProvider : IRemoteMetadataProviderWithOptions<MusicArtist, ArtistInfo>, IHasOrder
     {
-        private const string ProviderName = "Identity Checker - Artist";
+        private const string ProviderName = "Identity Helper - Artist";
         private const string DiscogsArtistId = "DiscogsArtist";
+        private static readonly TimeSpan PostFetchDelay = TimeSpan.FromSeconds(5);
         private readonly IHttpClient httpClient;
         private readonly IJsonSerializer json;
         private readonly ILogger logger;
@@ -46,6 +48,14 @@ namespace IdentityHelper.Providers
         {
             var result = new MetadataResult<MusicArtist> { Item = new MusicArtist() };
             var discogsId = GetProviderId(info, DiscogsArtistId);
+            this.logger.Info("Artist lookup lock state: isLocked={0}, overviewLocked={1}, lockedFields={2}",
+                info?.IsLocked ?? false,
+                info != null && (info.IsLocked || Array.IndexOf(info.LockedFields ?? Array.Empty<MetadataFields>(), MetadataFields.Overview) >= 0),
+                info?.LockedFields == null ? "<none>" : string.Join(",", info.LockedFields));
+            if (info != null && (info.IsLocked || Array.IndexOf(info.LockedFields ?? Array.Empty<MetadataFields>(), MetadataFields.Overview) >= 0))
+            {
+                this.logger.Warn("Emby has Overview locked for this artist. The fetched overview will be returned, but Emby's metadata merge may not save it until the field is unlocked.");
+            }
             this.logger.Info("Artist overview fetch started: name={0}, discogsId={1}, providerIds={2}",
                 info?.Name ?? "<null>", discogsId ?? "<missing>",
                 info?.ProviderIds == null ? 0 : info.ProviderIds.Count);
@@ -76,6 +86,11 @@ namespace IdentityHelper.Providers
                 {
                     this.logger.Info("Discogs response received: id={0}, status={1}, contentLength={2}",
                         discogsId, response.StatusCode, response.ContentLength);
+                    this.logger.Info("Discogs rate limit: id={0}, limit={1}, used={2}, remaining={3}",
+                        discogsId,
+                        GetHeader(response, "X-Discogs-Ratelimit"),
+                        GetHeader(response, "X-Discogs-Ratelimit-Used"),
+                        GetHeader(response, "X-Discogs-Ratelimit-Remaining"));
                     var artist = await this.json.DeserializeFromStreamAsync<DiscogsArtist>(response.Content).ConfigureAwait(false);
                     if (artist == null)
                     {
@@ -96,6 +111,13 @@ namespace IdentityHelper.Providers
                     result.HasMetadata = !string.IsNullOrWhiteSpace(result.Item.Overview);
                     this.logger.Info("Artist overview result ready: id={0}, overviewLength={1}, hasMetadata={2}",
                         discogsId, result.Item.Overview?.Length ?? 0, result.HasMetadata);
+                    if (result.HasMetadata)
+                    {
+                        this.logger.Debug("Artist overview text for Discogs ID {0}: {1}", discogsId, result.Item.Overview);
+                        this.logger.Debug("Waiting {0} ms before returning to Emby so the next Discogs request is spaced out.",
+                            (int)PostFetchDelay.TotalMilliseconds);
+                        await Task.Delay(PostFetchDelay, cancellationToken).ConfigureAwait(false);
+                    }
                     return result;
                 }
             }
@@ -141,6 +163,12 @@ namespace IdentityHelper.Providers
         {
             string value;
             return info != null && info.ProviderIds != null && info.ProviderIds.TryGetValue(key, out value) ? value : null;
+        }
+
+        private static string GetHeader(HttpResponseInfo response, string name)
+        {
+            string value;
+            return response?.Headers != null && response.Headers.TryGetValue(name, out value) ? value : "<unavailable>";
         }
 
         private sealed class DiscogsArtist
