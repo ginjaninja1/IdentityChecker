@@ -37,11 +37,6 @@ namespace IdentityHelper.UI.Config
         [AutoPostBack("updateconfig", nameof(AutomaticSource))]
         public AutomaticSeriesSearchSource AutomaticSource { get; set; } = AutomaticSeriesSearchSource.Inherit;
 
-        [DisplayName("Apply selected IDs")]
-        [Description("Off by default (dry run). Turn on to seed a confident TVDB/TMDB ID for Emby's stock metadata providers.")]
-        [AutoPostBack("updateconfig", nameof(ApplySelectedIds))]
-        public bool ApplySelectedIds { get; set; }
-
         public CaptionItem ScoringHeading { get; set; } = new CaptionItem("Match confidence");
         [DisplayName("Title weight")]
         [AutoPostBack("updateconfig", nameof(TitleWeight))]

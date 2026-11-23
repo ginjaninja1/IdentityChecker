@@ -53,7 +53,6 @@ namespace IdentityHelper.UI
                     ? incoming.AutomaticSource : AutomaticSeriesSearchSource.Inherit;
                 config.ManualPreferOnTie = Enum.IsDefined(typeof(SeriesSearchTieBreakPreference), incoming.ManualPreferOnTie)
                     ? incoming.ManualPreferOnTie : SeriesSearchTieBreakPreference.TheTVDB;
-                config.ApplySelectedIds = incoming.ApplySelectedIds;
                 config.TitleWeight = ValidWeight(incoming.TitleWeight, 0.8);
                 config.YearWeight = ValidWeight(incoming.YearWeight, 0.2);
                 if (config.TitleWeight + config.YearWeight <= 0) { config.TitleWeight = 0.8; config.YearWeight = 0.2; }
@@ -70,7 +69,6 @@ namespace IdentityHelper.UI
             this.ContentData = new ConfigUI {
                 EnablePlugin = config.EnablePlugin, ManualSource = config.ManualSource,
                 AutomaticSource = config.AutomaticSource, ManualPreferOnTie = config.ManualPreferOnTie,
-                ApplySelectedIds = config.ApplySelectedIds,
                 TitleWeight = config.TitleWeight, YearWeight = config.YearWeight
             };
         }

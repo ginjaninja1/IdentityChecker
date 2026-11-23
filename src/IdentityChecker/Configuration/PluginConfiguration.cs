@@ -29,7 +29,6 @@ namespace IdentityHelper.Configuration
         public ManualSeriesSearchSource ManualSource { get; set; } = ManualSeriesSearchSource.Both;
         public AutomaticSeriesSearchSource AutomaticSource { get; set; } = AutomaticSeriesSearchSource.Inherit;
         public SeriesSearchTieBreakPreference ManualPreferOnTie { get; set; } = SeriesSearchTieBreakPreference.TheTVDB;
-        public bool ApplySelectedIds { get; set; } = false;
         public double TitleWeight { get; set; } = 0.8;
         public double YearWeight { get; set; } = 0.2;
     }

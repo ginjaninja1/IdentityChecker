@@ -1,13 +1,11 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
-using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using IdentityHelper.Configuration;
 using IdentityHelper.Matching;
-using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Entities.TV;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.Providers;
@@ -19,7 +17,15 @@ using MediaBrowser.Model.Providers;
 
 namespace IdentityHelper.Providers
 {
-    /// <summary>Emby auto-discovers this class from its series metadata provider interface.</summary>
+    /// <summary>
+    /// Emby auto-discovers this class from its series remote metadata provider interface.
+    /// Manual Identify search ranks TVDB/TMDB results using the plugin's manual source setting. During an
+    /// automatic refresh (library scan or ingestion) it resolves the series' library from the item path, reads
+    /// that library's Series fetcher configuration, and returns any TVDB/TMDB IDs it seeds. User-initiated
+    /// refreshes, including the apply phase of a manual Identify, are left untouched. Emby merges returned IDs
+    /// into the lookup info handed to the providers that run after this one, so this provider must be ordered
+    /// ahead of the stock fetchers in the library's fetcher order.
+    /// </summary>
     public sealed class SeriesIdentityHelperProvider : IRemoteMetadataProviderWithOptions<Series, SeriesInfo>, IHasOrder
     {
         private const string ProviderName = "Identity Helper - Series";
@@ -43,9 +49,13 @@ namespace IdentityHelper.Providers
 
         public Task<HttpResponseInfo> GetImageResponse(string url, CancellationToken cancellationToken)
         {
-            // Results returned by this provider retain the stock SearchProviderName,
-            // so Emby requests their preview directly from the stock provider.
-            return Task.FromResult<HttpResponseInfo>(null);
+            // ProviderManager stamps SearchProviderName with this provider's name after
+            // GetSearchResults returns. Forward preview requests to the stock provider
+            // that owns the URL so Emby can display the selected result's image.
+            var source = url != null && url.IndexOf("themoviedb.org/", StringComparison.OrdinalIgnoreCase) >= 0
+                ? Tmdb
+                : Tvdb;
+            return this.providerManager.GetSearchImage(source, url, cancellationToken);
         }
 
         public async Task<IEnumerable<RemoteSearchResult>> GetSearchResults(SeriesInfo searchInfo, CancellationToken cancellationToken)
@@ -58,11 +68,12 @@ namespace IdentityHelper.Providers
                 this.logger.Info("ResolverStarted {0}: pathway=manual-search, disabled=true; returning=0", correlation);
                 return Enumerable.Empty<RemoteSearchResult>();
             }
-            // Emby's manual search callback receives only SeriesInfo; its API ItemId is not forwarded.
-            var sourcePlan = GetSourcePlan(config, searchInfo, null, correlation, manualPathway: true);
+            // Emby's manual search callback receives only SeriesInfo; its API ItemId is not forwarded,
+            // so library options are unavailable here and the plugin's own manual source setting applies.
+            var sourcePlan = GetManualSourcePlan(config, correlation);
             this.logger.Info("ResolverStarted {0}: pathway=manual-search, name={1}, year={2}, source={3}, language={4}, country={5}",
                 correlation, searchInfo?.Name, searchInfo?.Year, config.ManualSource, searchInfo?.MetadataLanguage, searchInfo?.MetadataCountryCode);
-            var found = await Search(searchInfo, null, sourcePlan.Sources,
+            var found = await Search(searchInfo, 0, sourcePlan.Sources,
                 sourcePlan.IncludeDisabledProviders, cancellationToken).ConfigureAwait(false);
             var selection = SeriesCandidateSelector.Select(searchInfo.Name, searchInfo.Year, found.Select(x => x.Candidate), config, sourcePlan.TieBreakOrder);
             LogSelection(correlation, selection);
@@ -75,26 +86,37 @@ namespace IdentityHelper.Providers
                 .ToList();
         }
 
-        public async Task<MetadataResult<Series>> GetMetadata(SeriesInfo info, CancellationToken cancellationToken)
+        public Task<MetadataResult<Series>> GetMetadata(SeriesInfo info, CancellationToken cancellationToken)
         {
-            return await Resolve(info, ResolveReferenceItem(info, null), cancellationToken).ConfigureAwait(false);
+            return ResolveMetadata(info, cancellationToken);
         }
 
-        public async Task<MetadataResult<Series>> GetMetadata(RemoteMetadataFetchOptions<SeriesInfo> options, CancellationToken cancellationToken)
+        public Task<MetadataResult<Series>> GetMetadata(RemoteMetadataFetchOptions<SeriesInfo> options, CancellationToken cancellationToken)
         {
-            return await Resolve(options.SearchInfo, ResolveReferenceItem(options.SearchInfo, null), cancellationToken).ConfigureAwait(false);
+            return ResolveMetadata(options.SearchInfo, cancellationToken);
         }
 
-        private async Task<MetadataResult<Series>> Resolve(SeriesInfo info, BaseItem referenceItem, CancellationToken cancellationToken)
+        /// <summary>
+        /// Seeds TVDB/TMDB IDs for a series that has neither. The result carries only those IDs
+        /// and reports metadata only when IDs were seeded.
+        /// </summary>
+        private async Task<MetadataResult<Series>> ResolveMetadata(SeriesInfo info, CancellationToken cancellationToken)
         {
+            var result = new MetadataResult<Series>();
             var config = GetConfiguration();
-            var result = new MetadataResult<Series> { Item = new Series(), HasMetadata = true };
             var correlation = Guid.NewGuid().ToString("N").Substring(0, 8);
             if (!config.EnablePlugin) { this.logger.Info("ResolverStarted {0}: disabled", correlation); return result; }
+            if (!info.IsAutomated)
+            {
+                // Manual Identify apply, Refresh metadata and metadata-editor saves are user-driven: the user's
+                // choice stands, and identity resolution only runs for automatic scans and ingestion.
+                this.logger.Info("ResolverDecision {0}: skipped; reason=user-initiated-refresh", correlation);
+                return result;
+            }
             var tvdbExisting = GetProviderId(info, TvdbId);
             var tmdbExisting = GetProviderId(info, TmdbId);
-            this.logger.Info("ResolverStarted {0}: name={1}, year={2}, tvdb={3}, tmdb={4}, source={5}, apply={6}, language={7}, country={8}",
-                correlation, info.Name, info.Year, tvdbExisting, tmdbExisting, config.AutomaticSource, config.ApplySelectedIds,
+            this.logger.Info("ResolverStarted {0}: name={1}, year={2}, tvdb={3}, tmdb={4}, source={5}, language={6}, country={7}",
+                correlation, info.Name, info.Year, tvdbExisting, tmdbExisting, config.AutomaticSource,
                 info.MetadataLanguage, info.MetadataCountryCode);
             if (!string.IsNullOrWhiteSpace(tvdbExisting) || !string.IsNullOrWhiteSpace(tmdbExisting))
             {
@@ -102,9 +124,10 @@ namespace IdentityHelper.Providers
                 return result;
             }
 
-            referenceItem = referenceItem ?? ResolveReferenceItem(info, correlation);
-            var sourcePlan = GetSourcePlan(config, info, referenceItem, correlation, manualPathway: false);
-            var found = await Search(info, referenceItem, sourcePlan.Sources,
+            var series = FindSeries(info, correlation);
+            var libraryOptions = series == null ? null : GetLibraryOptions(series, correlation);
+            var sourcePlan = GetLibrarySourcePlan(config, libraryOptions, correlation);
+            var found = await Search(info, series?.InternalId ?? 0, sourcePlan.Sources,
                 sourcePlan.IncludeDisabledProviders, cancellationToken).ConfigureAwait(false);
             var selection = SeriesCandidateSelector.Select(info.Name, info.Year, found.Select(x => x.Candidate), config, sourcePlan.TieBreakOrder);
             LogSelection(correlation, selection);
@@ -114,13 +137,18 @@ namespace IdentityHelper.Providers
                 this.logger.Info("ResolverDecision {0}: no candidate available ({1})", correlation, selection.Reason);
                 return result;
             }
-            this.logger.Info("ResolverDecision {0}: candidate={1}, source={2}, tvdb={3}, tmdb={4}, confidence={5:F3}, margin={6:F3}, reason={7}, apply={8}",
+            this.logger.Info("ResolverDecision {0}: candidate={1}, source={2}, tvdb={3}, tmdb={4}, confidence={5:F3}, margin={6:F3}, reason={7}",
                 correlation, chosen.Candidate.Name, chosen.Candidate.Source, chosen.Candidate.TvdbId ?? "none", chosen.Candidate.TmdbId ?? "none",
-                chosen.TotalScore, selection.Margin, selection.Reason, config.ApplySelectedIds);
-            if (!config.ApplySelectedIds) return result;
-            if (!string.IsNullOrWhiteSpace(chosen.Candidate.TvdbId)) result.Item.SetProviderId(TvdbId, chosen.Candidate.TvdbId);
-            if (!string.IsNullOrWhiteSpace(chosen.Candidate.TmdbId)) result.Item.SetProviderId(TmdbId, chosen.Candidate.TmdbId);
-            this.logger.Info("IdSeeded {0}: tvdb={1}, tmdb={2}; stock metadata fetchers will process the item next", correlation,
+                chosen.TotalScore, selection.Margin, selection.Reason);
+
+            var seeded = new Series();
+            if (!string.IsNullOrWhiteSpace(chosen.Candidate.TvdbId)) seeded.SetProviderId(TvdbId, chosen.Candidate.TvdbId);
+            if (!string.IsNullOrWhiteSpace(chosen.Candidate.TmdbId)) seeded.SetProviderId(TmdbId, chosen.Candidate.TmdbId);
+            if (seeded.ProviderIds.Count == 0) return result;
+
+            result.Item = seeded;
+            result.HasMetadata = true;
+            this.logger.Info("IdSeeded {0}: tvdb={1}, tmdb={2}; later providers in the library's fetcher order will receive these IDs", correlation,
                 chosen.Candidate.TvdbId, chosen.Candidate.TmdbId);
             return result;
         }
@@ -146,17 +174,19 @@ namespace IdentityHelper.Providers
                 selection.Selected.TotalScore, selection.Margin, selection.Reason);
         }
 
-        private async Task<List<ScoredCandidate>> Search(SeriesInfo info, BaseItem referenceItem, IReadOnlyList<string> sources,
+        /// <param name="itemId">Library item whose options the provider manager should apply; 0 when none is known.</param>
+        private async Task<List<ScoredCandidate>> Search(SeriesInfo info, long itemId, IReadOnlyList<string> sources,
             bool includeConfiguredSourcesDespiteManagerDefaults, CancellationToken cancellationToken)
         {
             var output = new List<ScoredCandidate>();
             foreach (var source in sources)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                var query = new RemoteSearchQuery<SeriesInfo> {
+                var query = new RemoteSearchQuery<SeriesInfo>
+                {
                     SearchInfo = info,
                     SearchProviderName = source,
-                    ItemId = referenceItem?.InternalId ?? 0,
+                    ItemId = itemId,
                     IncludeDisabledProviders = includeConfiguredSourcesDespiteManagerDefaults
                 };
                 var watch = Stopwatch.StartNew();
@@ -174,8 +204,12 @@ namespace IdentityHelper.Providers
                     {
                         position++;
                         var ids = item.ProviderIds ?? new Dictionary<string, string>();
-                        var candidate = new SeriesCandidate {
-                            Name = item.Name, Year = item.ProductionYear, Source = source, Position = position,
+                        var candidate = new SeriesCandidate
+                        {
+                            Name = item.Name,
+                            Year = item.ProductionYear,
+                            Source = source,
+                            Position = position,
                             TvdbId = ids.ContainsKey(TvdbId) ? ids[TvdbId] : null,
                             TmdbId = ids.ContainsKey(TmdbId) ? ids[TmdbId] : null
                         };
@@ -196,12 +230,14 @@ namespace IdentityHelper.Providers
                                 if (!string.IsNullOrWhiteSpace(same.TvdbId)) combined.TvdbId = same.TvdbId;
                                 if (!string.IsNullOrWhiteSpace(same.TmdbId)) combined.TmdbId = same.TmdbId;
                             }
-                            output.Add(new ScoredCandidate {
+                            output.Add(new ScoredCandidate
+                            {
                                 Candidate = combined,
                                 SearchResult = FindSearchResult(results, source, combined)
                             });
                         }
-                        else output.AddRange(sourceCandidates.Select(c => new ScoredCandidate {
+                        else output.AddRange(sourceCandidates.Select(c => new ScoredCandidate
+                        {
                             Candidate = c,
                             SearchResult = FindSearchResult(results, source, c)
                         }));
@@ -237,56 +273,70 @@ namespace IdentityHelper.Providers
                 providerIds, config.ManualSource, config.EnablePlugin);
         }
 
-        private BaseItem ResolveReferenceItem(SeriesInfo info, string correlation)
+        /// <summary>Resolves the library series for a refresh from the lookup info's path; null when it cannot be found.</summary>
+        private Series FindSeries(SeriesInfo info, string correlation)
         {
-            if (info == null)
+            if (string.IsNullOrWhiteSpace(info?.Path))
             {
-                this.logger.Info("LibraryContextLookup {0}: reference-item lookup skipped; reason=search-info-null", correlation ?? "n/a");
-                return null;
-            }
-            if (string.IsNullOrWhiteSpace(info.Path))
-            {
-                this.logger.Info("LibraryContextLookup {0}: reference-item lookup skipped; reason=path-empty", correlation ?? "n/a");
+                this.logger.Info("LibraryContextLookup {0}: skipped; reason=path-empty", correlation);
                 return null;
             }
             try
             {
-                var item = this.libraryManager.FindByPath(info.Path, true);
-                if (item is Series)
+                var found = this.libraryManager.FindByPath(info.Path, true);
+                var series = found as Series;
+                if (series != null)
                 {
-                    this.logger.Info("LibraryContextLookup {0}: FindByPath matched series; itemId={1}, path={2}", correlation ?? "n/a", item.InternalId, item.Path);
-                    return item;
+                    this.logger.Info("LibraryContextLookup {0}: FindByPath matched series; itemId={1}, path={2}", correlation, series.InternalId, series.Path);
+                    return series;
                 }
                 this.logger.Info("LibraryContextLookup {0}: FindByPath result={1}; expected=Series, path={2}",
-                    correlation ?? "n/a", item == null ? "no-item" : item.GetType().FullName, info.Path);
+                    correlation, found == null ? "no-item" : found.GetType().FullName, info.Path);
                 return null;
             }
             catch (Exception ex)
             {
-                this.logger.ErrorException("LibraryContextLookup " + (correlation ?? "n/a") + ": FindByPath threw for path " + info.Path, ex);
+                this.logger.ErrorException("LibraryContextLookup " + correlation + ": FindByPath threw for path " + info.Path, ex);
                 return null;
             }
         }
 
-        private SourcePlan GetSourcePlan(PluginConfiguration config, SeriesInfo searchInfo, BaseItem referenceItem,
-            string correlation, bool manualPathway)
+        private LibraryOptions GetLibraryOptions(Series series, string correlation)
         {
-            LibraryOptions options = !manualPathway && referenceItem == null
-                ? FindLibraryOptionsByPath(searchInfo?.Path, correlation)
-                : null;
-            TypeOptions seriesOptions = null;
-            if (referenceItem != null)
+            try
             {
-                try
-                {
-                    options = this.libraryManager.GetLibraryOptions(referenceItem);
-                }
-                catch (Exception ex)
-                {
-                    this.logger.ErrorException("LibraryProviderConfiguration " + correlation + ": GetLibraryOptions(item) threw", ex);
-                }
+                return this.libraryManager.GetLibraryOptions(series);
             }
-            seriesOptions = options?.GetTypeOptions("Series");
+            catch (Exception ex)
+            {
+                this.logger.ErrorException("LibraryProviderConfiguration " + correlation + ": GetLibraryOptions(item) threw", ex);
+                return null;
+            }
+        }
+
+        /// <summary>Manual search has no library context, so sources come solely from the plugin's manual setting.</summary>
+        private SourcePlan GetManualSourcePlan(PluginConfiguration config, string correlation)
+        {
+            var sources = GetSources(config.ManualSource).ToList();
+            var tieBreakOrder = config.ManualSource == ManualSeriesSearchSource.Both
+                ? GetManualTieBreakOrder(config.ManualPreferOnTie).ToList()
+                : sources.ToList();
+            if (tieBreakOrder.Count == 0) tieBreakOrder.AddRange(new[] { Tvdb, Tmdb });
+
+            this.logger.Info("LibraryProviderConfiguration {0}: pathway=manual-search, context=not-forwarded-by-manual-provider-contract, sourceMode={1}, selectedSources={2}, tieBreakOrder={3}",
+                correlation, config.ManualSource, FormatList(sources), FormatList(tieBreakOrder));
+            return new SourcePlan
+            {
+                Sources = sources,
+                TieBreakOrder = tieBreakOrder,
+                IncludeDisabledProviders = true
+            };
+        }
+
+        /// <summary>Refresh pathway (scan and Identify apply): sources and tie-break order follow the library's configured Series fetchers.</summary>
+        private SourcePlan GetLibrarySourcePlan(PluginConfiguration config, LibraryOptions options, string correlation)
+        {
+            var seriesOptions = options?.GetTypeOptions("Series");
 
             // Library configuration can expose the enabled fetchers in their configured
             // sequence while MetadataFetcherOrder is empty. Use that sequence as the
@@ -294,139 +344,55 @@ namespace IdentityHelper.Providers
             // the library's visible provider priority.
             var rawFetcherNames = seriesOptions?.MetadataFetchers ?? Array.Empty<string>();
             var rawFetcherOrder = seriesOptions?.MetadataFetcherOrder ?? Array.Empty<string>();
-            var configuredEnabled = rawFetcherNames
-                .Where(x => IsResolverSource(x)).ToList();
+            var configuredEnabled = rawFetcherNames.Where(IsResolverSource).ToList();
             var effectiveOrder = rawFetcherOrder.Length > 0 ? rawFetcherOrder : rawFetcherNames;
             var orderSource = rawFetcherOrder.Length > 0 ? "MetadataFetcherOrder" :
                 rawFetcherNames.Length > 0 ? "MetadataFetchers-sequence-fallback" : "none";
             var configuredOrder = effectiveOrder
-                .Where(x => IsResolverSource(x)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+                .Where(IsResolverSource).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
             var inheritedSources = configuredEnabled
                 .OrderBy(x => ProviderOrder(configuredOrder, x))
                 .ThenBy(x => x, StringComparer.OrdinalIgnoreCase)
                 .Select(NormalizeSource)
                 .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
 
-            var automaticMode = config.AutomaticSource;
-            var mode = manualPathway ? config.ManualSource.ToString() : automaticMode.ToString();
+            var mode = config.AutomaticSource;
             List<string> sources;
-            if (manualPathway)
+            if (mode == AutomaticSeriesSearchSource.Inherit)
             {
-                sources = GetSources(config.ManualSource).ToList();
-            }
-            else if (automaticMode == AutomaticSeriesSearchSource.Inherit && options != null)
-            {
-                sources = inheritedSources;
-            }
-            else if (automaticMode == AutomaticSeriesSearchSource.Inherit)
-            {
-                // Without a library reference, use the server's registered stock defaults available to this SDK call.
-                sources = new List<string> { Tvdb, Tmdb };
+                // Without library options, fall back to the stock sources.
+                sources = options != null ? inheritedSources : new List<string> { Tvdb, Tmdb };
             }
             else
             {
-                sources = GetSources(automaticMode).ToList();
+                sources = GetSources(mode).ToList();
             }
 
             var tieBreakOrder = configuredOrder.Select(NormalizeSource).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
             if (tieBreakOrder.Count == 0) tieBreakOrder.AddRange(inheritedSources);
-            if (manualPathway)
-            {
-                tieBreakOrder = config.ManualSource == ManualSeriesSearchSource.Both
-                    ? GetManualTieBreakOrder(config.ManualPreferOnTie).ToList()
-                    : sources.ToList();
-            }
             if (tieBreakOrder.Count == 0) tieBreakOrder.AddRange(new[] { Tvdb, Tmdb });
 
-            var context = manualPathway ? "not-forwarded-by-manual-provider-contract" :
-                referenceItem != null ? "item" : options != null ? "virtual-folder" : "unavailable";
-            var rawOrderStatus = options == null ? "library-options-unavailable" : seriesOptions == null ? "series-type-options-unavailable" :
-                rawFetcherOrder.Length == 0 ? "metadata-fetcher-order-empty" : "metadata-fetcher-order-read";
-            var filteredOrderStatus = options == null ? "not-read" : seriesOptions == null ? "not-read" :
-                configuredOrder.Count == 0 ? "no-tvdb-tmdb-name-match" : "matched-tvdb-tmdb";
-            this.logger.Info("LibraryProviderConfiguration {0}: pathway={1}, context={2}, inputPath={3}, itemResolved={4}, optionsResolved={5}, seriesTypeOptions={6}, sourceMode={7}, detectedEnabled={8}, detectedOrder={9}, detectedOrderSource={10}, metadataFetcherOrderStatus={11}, metadataFetcherOrderRaw={12}, detectedOrderFilterStatus={13}, metadataFetcherNamesRaw={14}, inheritedSources={15}, selectedSources={16}, tieBreakOrder={17}, fallbackReason={18}",
-                correlation, manualPathway ? "manual" : "automatic", context, searchInfo?.Path ?? "<null>", referenceItem != null, options != null, seriesOptions != null, mode,
+            this.logger.Info("LibraryProviderConfiguration {0}: pathway=refresh, optionsResolved={1}, seriesTypeOptions={2}, sourceMode={3}, detectedEnabled={4}, detectedOrder={5}, detectedOrderSource={6}, metadataFetcherOrderRaw={7}, metadataFetcherNamesRaw={8}, inheritedSources={9}, selectedSources={10}, tieBreakOrder={11}, fallbackReason={12}",
+                correlation, options != null, seriesOptions != null, mode,
                 options == null ? "<unavailable>" : FormatList(configuredEnabled),
                 options == null ? "<unavailable>" : FormatList(configuredOrder),
-                options == null ? "<unavailable>" : orderSource, rawOrderStatus,
-                options == null ? "<unavailable>" : FormatList(rawFetcherOrder), filteredOrderStatus,
-                options == null ? "<unavailable>" : FormatList(rawFetcherNames), FormatList(inheritedSources), FormatList(sources), FormatList(tieBreakOrder),
-                manualPathway ? "manual-source-is-explicit" :
-                    options != null ? "none" : automaticMode == AutomaticSeriesSearchSource.Inherit ? "no-library-options" : "explicit-source-mode");
-            return new SourcePlan {
+                options == null ? "<unavailable>" : orderSource,
+                options == null ? "<unavailable>" : FormatList(rawFetcherOrder),
+                options == null ? "<unavailable>" : FormatList(rawFetcherNames),
+                FormatList(inheritedSources), FormatList(sources), FormatList(tieBreakOrder),
+                options != null ? "none" : mode == AutomaticSeriesSearchSource.Inherit ? "no-library-options" : "explicit-source-mode");
+            return new SourcePlan
+            {
                 Sources = sources,
                 TieBreakOrder = tieBreakOrder,
-                IncludeDisabledProviders = manualPathway || automaticMode != AutomaticSeriesSearchSource.Inherit ||
-                    (options != null && referenceItem == null)
+                IncludeDisabledProviders = mode != AutomaticSeriesSearchSource.Inherit
             };
-        }
-
-        private LibraryOptions FindLibraryOptionsByPath(string path, string correlation)
-        {
-            if (string.IsNullOrWhiteSpace(path))
-            {
-                this.logger.Info("VirtualFolderLookup {0}: skipped; reason=search-path-empty", correlation);
-                return null;
-            }
-            try
-            {
-                var normalizedPath = NormalizePath(path);
-                var folders = this.libraryManager.GetVirtualFolders()?.ToList() ?? new List<MediaBrowser.Model.Entities.VirtualFolderInfo>();
-                this.logger.Info("VirtualFolderLookup {0}: searchPath={1}, normalizedPath={2}, folderCount={3}", correlation, path, normalizedPath, folders.Count);
-                var matches = folders
-                    .Where(folder => folder != null)
-                    .SelectMany(folder => (folder.Locations ?? Array.Empty<string>())
-                        .Where(location => !string.IsNullOrWhiteSpace(location))
-                        .Select(location => new { Folder = folder, Location = location, Root = NormalizePath(location) }))
-                    .ToList();
-                foreach (var candidate in matches)
-                {
-                    this.logger.Info("VirtualFolderCandidate {0}: name={1}, location={2}, normalizedRoot={3}, containsSearchPath={4}, hasLibraryOptions={5}",
-                        correlation, candidate.Folder.Name ?? "<null>", candidate.Location, candidate.Root,
-                        IsPathWithin(normalizedPath, candidate.Root), candidate.Folder.LibraryOptions != null);
-                }
-                var selected = matches
-                    .Where(candidate => candidate.Folder.LibraryOptions != null && IsPathWithin(normalizedPath, candidate.Root))
-                    .OrderByDescending(match => match.Root.Length)
-                    .FirstOrDefault();
-                if (selected == null)
-                {
-                    this.logger.Info("VirtualFolderLookup {0}: no match; reason={1}", correlation,
-                        matches.Count == 0 ? "no-configured-locations" : "no-containing-location-with-library-options");
-                    return null;
-                }
-                this.logger.Info("VirtualFolderLookup {0}: selected name={1}, location={2}", correlation, selected.Folder.Name, selected.Location);
-                return selected.Folder.LibraryOptions;
-            }
-            catch (Exception ex)
-            {
-                this.logger.ErrorException("VirtualFolderLookup " + correlation + ": failed for search path " + path, ex);
-                return null;
-            }
         }
 
         private static string FormatList(IEnumerable<string> values)
         {
             var list = values?.ToList() ?? new List<string>();
             return list.Count == 0 ? "<empty>" : string.Join(",", list);
-        }
-
-        private static string NormalizePath(string path)
-        {
-            var fullPath = Path.GetFullPath(path);
-            var root = Path.GetPathRoot(fullPath);
-            return fullPath.Length > (root?.Length ?? 0)
-                ? fullPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
-                : fullPath;
-        }
-
-        private static bool IsPathWithin(string path, string root)
-        {
-            if (string.Equals(path, root, StringComparison.OrdinalIgnoreCase)) return true;
-            var prefix = root.EndsWith(Path.DirectorySeparatorChar.ToString(), StringComparison.Ordinal)
-                ? root
-                : root + Path.DirectorySeparatorChar;
-            return path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase);
         }
 
         private static IReadOnlyList<string> GetManualTieBreakOrder(SeriesSearchTieBreakPreference preference)
@@ -493,9 +459,6 @@ namespace IdentityHelper.Providers
         {
             public SeriesCandidate Candidate { get; set; }
             public RemoteSearchResult SearchResult { get; set; }
-            public SeriesCandidateScore Score { get; set; }
         }
     }
 }
-
-
